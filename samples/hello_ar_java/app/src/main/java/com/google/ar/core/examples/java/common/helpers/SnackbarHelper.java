@@ -41,7 +41,11 @@ public final class SnackbarHelper {
   public void showMessage(Activity activity, String message) {
     if (!message.isEmpty() && (!isShowing() || !lastMessage.equals(message))) {
       lastMessage = message;
-      show(activity, message, DismissBehavior.HIDE);
+      if (!isShowing()) {
+        show(activity, message, DismissBehavior.HIDE);
+      } else {
+        setText(activity, message);
+      }
     }
   }
 
@@ -108,6 +112,19 @@ public final class SnackbarHelper {
 
   private void show(Activity activity, String message, DismissBehavior dismissBehavior) {
     show(activity, message, dismissBehavior, Snackbar.LENGTH_INDEFINITE);
+  }
+
+  private void setText(final Activity activity, final String message) {
+    activity.runOnUiThread(
+            new Runnable() {
+              @Override
+              public void run() {
+                if (messageSnackbar == null) {
+                  return;
+                }
+                messageSnackbar.setText(message);
+              }
+            });
   }
 
   private void show(

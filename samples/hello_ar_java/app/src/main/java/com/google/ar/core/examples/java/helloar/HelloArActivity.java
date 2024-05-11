@@ -47,6 +47,7 @@ import com.google.ar.core.Plane;
 import com.google.ar.core.Point;
 import com.google.ar.core.Point.OrientationMode;
 import com.google.ar.core.PointCloud;
+import com.google.ar.core.Pose;
 import com.google.ar.core.Session;
 import com.google.ar.core.Trackable;
 import com.google.ar.core.TrackingFailureReason;
@@ -515,6 +516,8 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
     }
 
     // Handle one tap per frame.
+    // TODO: Could we use the depth image to set the target point as far away as possible?
+    // TODO: If the depth changes can we move the target point further along the same ray?
     handleTap(frame, camera);
 
     // Keep the screen unlocked while tracking, but allow it to lock when tracking stops.
@@ -523,6 +526,39 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
     // Show a message based on whether tracking has failed, if planes are detected, and if the user
     // has placed any objects.
     String message = null;
+    if (wrappedAnchors.size() == 2 && camera.getTrackingState() == TrackingState.TRACKING) {
+      // TODO: Get diff between current camera pose and target ray / point, and instruct the user
+      // how to go in the right direction in world coordinates.
+      // First, get the current position, including camera rotation (we need to know if you are
+      // facing twds or away)
+      Pose cameraPose = camera.getDisplayOrientedPose();
+
+      // I want to get the difference in x and z from the camera to the (target point or ray?)
+      // let's start with the target point.
+      // TODO: Later let's get the ray from start to end, find the closet point along that ray,
+      // and then aim about 2-3 meters in front of it.
+      WrappedAnchor target = wrappedAnchors.get(1);
+      Pose targetPose = target.getAnchor().getPose();
+
+      // Go from cameraPose to world pose then world pose to target pose
+      // to get a camera to target offset.
+      Pose offsetPose = cameraPose.inverse().compose(targetPose);
+
+      // Ignore the rotation offset, we only care about getting to the right point, not
+      // getting the orientation at that point.
+      Pose offsetTranslation = offsetPose.extractTranslation();
+
+      // Convert back into local camera coordinates.
+      Pose localTranslation = offsetTranslation.inverse().compose(cameraPose);
+
+      // Print the offset between this camera pose and the target pose.
+      message = localTranslation.toString();
+
+      // Now the quat shows rotation left/right in y, tilt left/right in z, and tilt forward/back in x.
+      // we only care about rotation left/right in y, this is looking left/right.
+      // Now the translation shows how far to go in x, y and z until we reach the point.
+      // We only care about x and z, y (the height) isn't important for walking straight.
+    }
     if (camera.getTrackingState() == TrackingState.PAUSED) {
       if (camera.getTrackingFailureReason() == TrackingFailureReason.NONE) {
         message = SEARCHING_PLANE_MESSAGE;
@@ -608,7 +644,7 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
       virtualObjectShader.setMat4("u_ModelView", modelViewMatrix);
       virtualObjectShader.setMat4("u_ModelViewProjection", modelViewProjectionMatrix);
 
-      if (trackable instanceof InstantPlacementPoint
+      if (trackable != null && trackable instanceof InstantPlacementPoint
           && ((InstantPlacementPoint) trackable).getTrackingMethod()
               == InstantPlacementPoint.TrackingMethod.SCREENSPACE_WITH_APPROXIMATE_DISTANCE) {
         virtualObjectShader.setTexture(
@@ -627,9 +663,64 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
   // Handle only one tap per frame, as taps are usually low frequency compared to frame rate.
   private void handleTap(Frame frame, Camera camera) {
     MotionEvent tap = tapHelper.poll();
-    if (tap != null && camera.getTrackingState() == TrackingState.TRACKING) {
-      List<HitResult> hitResultList;
+    if (tap == null || camera.getTrackingState() != TrackingState.TRACKING) {
+      return;
+    }
+
+    // Cap the number of objects created. This avoids overloading both the
+    // rendering system and ARCore.
+
+    // Clear all the wrapped anchors, start fresh.
+    while (wrappedAnchors.size() > 0) {
+      wrappedAnchors.get(0).getAnchor().detach();
+      wrappedAnchors.remove(0);
+    }
+
+    // Also this, although it assumes the phone is oriented properly?
+    // Can we make translation in the world Z and not camera Z? Does this do that?
+    // Would be great if we could look out ahead of the camera instead of tapping the right
+    // place on the screen??
+
+    // First create the camera's current point.
+    // Extracting translation means that I lose the orientation of the camera, which is OK,
+    // it makes my tracking object appear vertical.
+    Pose cameraPose = camera.getDisplayOrientedPose();
+    Pose cameraTranslation = cameraPose.extractTranslation();
+    wrappedAnchors.add(new WrappedAnchor(session.createAnchor(cameraTranslation), null));
+
+    // Now create the target direction point.
+
+    // Doing this creates something down the camera's Z axis, which depends on the
+    // phone orientation. If the phone is in portrait mode, it's to the left horizontally.
+    // So it's not with respect to the world.
+    // Pose cameraRelativePose = camera.getPose().makeTranslation(0.0f, 0.0f, -1.0f);
+
+    // This makes a world-space translation against the camera's current position.
+    // I could theoretically use a hit test to decide how far away (-3 m is a bit far for my house).
+    // getDisplayOrientedPose is aware of the display direction but is functionally the same for me (just rotated from getPose)
+    // put it somewhere in front of the camera
+    Pose targetPose = cameraPose.compose(Pose.makeTranslation(0, 0, -2.0f)).extractTranslation();
+    // bring it back down to same height as camera
+    targetPose = targetPose.compose(Pose.makeTranslation(0, cameraTranslation.ty() - targetPose.ty(), 0));
+    // Would be better to have a fixed distance away rather than projecting it back down
+    // but this is OK for now.
+    wrappedAnchors.add(new WrappedAnchor(session.createAnchor(targetPose), null));
+
+    // I don't need the trackable if I don't use instant placement!!
+    // Then I can just set these two anchors and see what happens.
+
+    boolean runHitTest = false;
+    if (!runHitTest) {
+      return;
+    }
+
+    // This does hit testing.
+    // Maybe can use later for obstacle detection.
+    List<HitResult> hitResultList;
       if (instantPlacementSettings.isInstantPlacementEnabled()) {
+        // https://developers.google.com/ar/reference/java/com/google/ar/core/InstantPlacementPoint
+        // TODO: Do I want to allow this or just do it for planes that already have Z?
+        // I think it's easier to ignore for now.
         hitResultList =
             frame.hitTestInstantPlacement(tap.getX(), tap.getY(), APPROXIMATE_DISTANCE_METERS);
       } else {
@@ -637,28 +728,53 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
       }
       for (HitResult hit : hitResultList) {
         // If any plane, Oriented Point, or Instant Placement Point was hit, create an anchor.
+        // https://developers.google.com/ar/reference/java/com/google/ar/core/Trackable
         Trackable trackable = hit.getTrackable();
         // If a plane was hit, check that it was hit inside the plane polygon.
         // DepthPoints are only returned if Config.DepthMode is set to AUTOMATIC.
-        if ((trackable instanceof Plane
-                && ((Plane) trackable).isPoseInPolygon(hit.getHitPose())
-                && (PlaneRenderer.calculateDistanceToPlane(hit.getHitPose(), camera.getPose()) > 0))
-            || (trackable instanceof Point
-                && ((Point) trackable).getOrientationMode()
-                    == OrientationMode.ESTIMATED_SURFACE_NORMAL)
-            || (trackable instanceof InstantPlacementPoint)
-            || (trackable instanceof DepthPoint)) {
-          // Cap the number of objects created. This avoids overloading both the
-          // rendering system and ARCore.
-          if (wrappedAnchors.size() >= 20) {
-            wrappedAnchors.get(0).getAnchor().detach();
-            wrappedAnchors.remove(0);
+
+        // TODO: What is a plane polygon? Do I need to be inside it?
+        // Probably can skip most of these until I get to a plane that is UPWARDS
+        // https://developers.google.com/ar/reference/java/com/google/ar/core/Plane.Type#horizontal_upward_facing
+        // because objects on a plane aren't very good to use as direction.
+        // Better perhaps would be to create a ray in the world in case the point is above a plane.
+
+
+//        if ((trackable instanceof Plane
+//                && ((Plane) trackable).isPoseInPolygon(hit.getHitPose())
+//                && (PlaneRenderer.calculateDistanceToPlane(hit.getHitPose(), camera.getPose()) > 0))
+//            || (trackable instanceof Point
+//                && ((Point) trackable).getOrientationMode()
+//                    == OrientationMode.ESTIMATED_SURFACE_NORMAL)
+//            || (trackable instanceof InstantPlacementPoint)
+//            || (trackable instanceof DepthPoint)) {
+
+        if (trackable instanceof Plane) {
+          Plane plane = (Plane) trackable;
+          // We want to hit a plane that's representing the floor.
+          if (!plane.isPoseInPolygon(hit.getHitPose()) || plane.getType() != Plane.Type.HORIZONTAL_UPWARD_FACING) {
+            continue;
           }
+
+          float distanceToPlane = PlaneRenderer.calculateDistanceToPlane(hit.getHitPose(), camera.getPose());
+          // Shortest distance to this plane. This is straight down for the floor plane, for example.
+          if (distanceToPlane <= 0) {
+            continue;
+          }
+
+          // Start by making just 1 or 2 anchors for now (maybe "here" and "target")
+          // Looks like I can also make a new anchor, session.createAnchor(pose)
+          // Alternatively I can use one from the hit test.
+          // Probably I'll create an anchor from the current camera pose when tracking
+          // starts. Maybe on tap??
+          // Or I can make one that's N meters away using session.createAnchor(pose)
+          // rather than a hit test.
+
 
           // Adding an Anchor tells ARCore that it should track this position in
           // space. This anchor is created on the Plane to place the 3D model
           // in the correct position relative both to the world and to the plane.
-          wrappedAnchors.add(new WrappedAnchor(hit.createAnchor(), trackable));
+//          wrappedAnchors.add(new WrappedAnchor(hit.createAnchor(), trackable));
           // For devices that support the Depth API, shows a dialog to suggest enabling
           // depth-based occlusion. This dialog needs to be spawned on the UI thread.
           this.runOnUiThread(this::showOcclusionDialogIfNeeded);
@@ -668,7 +784,7 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
           break;
         }
       }
-    }
+
   }
 
   /**
