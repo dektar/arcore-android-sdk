@@ -533,31 +533,56 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
       // facing twds or away)
       Pose cameraPose = camera.getDisplayOrientedPose();
 
+      // Project the camera down onto the xz plane. Then we can ignore y.
+      Pose xzCameraPose = cameraPose.extractTranslation().compose(Pose.makeTranslation(0, -cameraPose.ty(), 0)).compose(cameraPose.extractRotation());
+
       // I want to get the difference in x and z from the camera to the (target point or ray?)
       // let's start with the target point.
       // TODO: Later let's get the ray from start to end, find the closet point along that ray,
       // and then aim about 2-3 meters in front of it.
       WrappedAnchor target = wrappedAnchors.get(1);
       Pose targetPose = target.getAnchor().getPose();
+      Pose xzTargetPose = targetPose.compose(Pose.makeTranslation(0, -targetPose.ty(), 0));
 
-      // Go from cameraPose to world pose then world pose to target pose
-      // to get a camera to target offset.
+      // Calculate the target's pose in camera coordinates.
       Pose offsetPose = cameraPose.inverse().compose(targetPose);
+
+      float xdist = targetPose.tx() - cameraPose.tx();
+      float zdist = targetPose.tz() - cameraPose.tz();
+      float dist2 = (float) (Math.sqrt(xdist * xdist + zdist * zdist));
+
 
       // Ignore the rotation offset, we only care about getting to the right point, not
       // getting the orientation at that point.
-      Pose offsetTranslation = offsetPose.extractTranslation();
+      Pose localTranslation = offsetPose.extractTranslation();
 
       // Convert back into local camera coordinates.
-      Pose localTranslation = offsetTranslation.inverse().compose(cameraPose);
-
-      // Print the offset between this camera pose and the target pose.
-      message = localTranslation.toString();
+//      Pose localTranslation = offsetTranslation.inverse().compose(cameraPose);
 
       // Now the quat shows rotation left/right in y, tilt left/right in z, and tilt forward/back in x.
       // we only care about rotation left/right in y, this is looking left/right.
       // Now the translation shows how far to go in x, y and z until we reach the point.
       // We only care about x and z, y (the height) isn't important for walking straight.
+
+      float q_y = localTranslation.qy();
+      float z = localTranslation.tz(); // how much straight to go once oriented correctly
+      float x = localTranslation.tx(); // how much left to go (may be negative)
+
+      float dist = (float) (Math.sqrt(x * x + z * z));
+
+      message = "Dist: " + String.format("%.2f %.2f", dist, dist2);
+
+      message += localTranslation.toString();
+
+      if (x < 0) {
+        message += " to your right: " + String.format("%.2f", x);
+      } else if (x > 0) {
+        message += " to your left: " + String.format("%.2f", x);
+      }
+//
+//      message += ". " + String.format("%.2f, %.2f, %.2f, %.2f", localTranslation.qx(), localTranslation.qy(), localTranslation.qz(), localTranslation.qw());
+
+
     }
     if (camera.getTrackingState() == TrackingState.PAUSED) {
       if (camera.getTrackingFailureReason() == TrackingFailureReason.NONE) {
