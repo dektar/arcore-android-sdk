@@ -533,8 +533,20 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
       // facing twds or away)
       Pose cameraPose = camera.getDisplayOrientedPose();
 
-      // Project the camera down onto the xz plane. Then we can ignore y.
-      Pose xzCameraPose = cameraPose.extractTranslation().compose(Pose.makeTranslation(0, -cameraPose.ty(), 0)).compose(cameraPose.extractRotation());
+      // This is the 3D camera point in world coordinates.
+      float[] cameraPt = {0, 0, 0};
+      cameraPt = cameraPose.transformPoint(cameraPt);
+
+      // This is the way the camera is looking:
+      // If it's (0, 0, -1) in camera coordinates, we can get it here
+      // in world coordinates.
+      float[] cameraDir = {0, 0, -1};
+      cameraDir = cameraPose.transformPoint(cameraDir);
+      // We can normalize it.
+      double cameraDirSum = Math.sqrt(Math.pow(cameraDir[0], 2) + Math.pow(cameraDir[1], 2) + Math.pow(cameraDir[2], 2));
+      cameraDir[0] /= cameraDirSum;
+      cameraDir[1] /= cameraDirSum;
+      cameraDir[2] /= cameraDirSum;
 
       // I want to get the difference in x and z from the camera to the (target point or ray?)
       // let's start with the target point.
@@ -542,19 +554,26 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
       // and then aim about 2-3 meters in front of it.
       WrappedAnchor target = wrappedAnchors.get(1);
       Pose targetPose = target.getAnchor().getPose();
-      Pose xzTargetPose = targetPose.compose(Pose.makeTranslation(0, -targetPose.ty(), 0));
 
-      // Calculate the target's pose in camera coordinates.
-      Pose offsetPose = cameraPose.inverse().compose(targetPose);
+      // This is the world-space coordinates of the target point.
+      float[] targetPt = {0, 0, 0};
+      targetPt = targetPose.transformPoint(targetPt);
 
-      float xdist = targetPose.tx() - cameraPose.tx();
-      float zdist = targetPose.tz() - cameraPose.tz();
-      float dist2 = (float) (Math.sqrt(xdist * xdist + zdist * zdist));
+      // This is where I want the camera to be *in camera coordinates*.
+      // In other words, how much x, y and z from the current camera position if the current
+      // is (0, 0, 0).
+      float[] targetDir = cameraPose.inverse().transformPoint(targetPt);
+      double targetDirSum = Math.sqrt(Math.pow(targetDir[0], 2) + Math.pow(targetDir[1], 2) + Math.pow(targetDir[2], 2));
+      double[] targetDirNorm = {targetDir[0] / targetDirSum, targetDir[1] / targetDirSum, targetDir[2] / targetDirSum};
+
+//      Log.d("pts", String.format("%.2f, %.2f, %.2f; %.2f, %.2f, %.2f; \t %.2f, %.2f, %.2f",
+//              cameraPt[0], cameraPt[1], cameraPt[2], targetPt[0], targetPt[1], targetPt[2],
+//              targetDir[0], targetDir[1], targetDir[2]));
 
 
       // Ignore the rotation offset, we only care about getting to the right point, not
       // getting the orientation at that point.
-      Pose localTranslation = offsetPose.extractTranslation();
+//      Pose localTranslation = offsetPose.extractTranslation();
 
       // Convert back into local camera coordinates.
 //      Pose localTranslation = offsetTranslation.inverse().compose(cameraPose);
@@ -564,24 +583,76 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
       // Now the translation shows how far to go in x, y and z until we reach the point.
       // We only care about x and z, y (the height) isn't important for walking straight.
 
-      float q_y = localTranslation.qy();
-      float z = localTranslation.tz(); // how much straight to go once oriented correctly
-      float x = localTranslation.tx(); // how much left to go (may be negative)
+
+      // Project the camera down onto the xz plane. Then we can ignore y.
+      Pose xzCameraPose = cameraPose.extractTranslation().compose(Pose.makeTranslation(0, -cameraPose.ty(), 0)).compose(cameraPose.extractRotation().inverse());
+      Pose xzTargetPose = targetPose.compose(Pose.makeTranslation(0, -targetPose.ty(), 0));
+
+      // Calculate the target's pose in camera coordinates.
+      // This gives 2D rotation and translation.
+      Pose offsetPose = xzCameraPose.inverse().compose(xzTargetPose);
+
+      float q_y = offsetPose.qy();
+      float z = offsetPose.tz(); // how much straight to go once oriented correctly
+      float x = offsetPose.tx(); // how much left to go (may be negative)
 
       float dist = (float) (Math.sqrt(x * x + z * z));
 
-      message = "Dist: " + String.format("%.2f %.2f", dist, dist2);
+      // Alternative dist calculation.
+      float xdist = targetPose.tx() - cameraPose.tx();
+      float zdist = targetPose.tz() - cameraPose.tz();
+      float dist2 = (float) (Math.sqrt(xdist * xdist + zdist * zdist));
 
-      message += localTranslation.toString();
+      // Try from world-space points too.
+      // Only need x and z coordinates (x/z plane is the plane of interest). We'll ignore y.
+      // TODO: This only works if the camera isn't rotated along the z axis, e.g. it's portrait mode.
+      // I should be able to do better but can't bother right now.
+      float tx = targetDir[0];
+      float tz = targetDir[2];
+      float dist3 = (float) (Math.sqrt(Math.pow(tx, 2) + Math.pow(tz, 2)));
 
-      if (x < 0) {
-        message += " to your right: " + String.format("%.2f", x);
-      } else if (x > 0) {
-        message += " to your left: " + String.format("%.2f", x);
+      if (dist3 < .1f) {
+        // Close enough.
+        message = "You did it!";
+      } else {
+        double thetaFromZ = Math.acos(-tz / dist3);
+        double thetaFromX = Math.PI / 2 - Math.acos(-tx / dist3);
+        double degreesFromX = (thetaFromX * 360 / (2 * Math.PI)) % 360;
+        double degreesFromZ = (thetaFromZ * 360 / (2 * Math.PI)) % 360;
+
+        // 0 is straight ahead
+        // 180 or -180 (e.g. degreesFromX < 0) is straight behind
+        // 90 is at 3, -90 is at 9 on a clock
+
+        if (degreesFromZ < 1) {
+          message = "Go straight and";
+        } else {
+
+          String direction = "Turn left by %.2f degrees, then";
+          if (degreesFromX < 0) {
+            direction = "Turn right by %.2f degrees, then";
+          }
+
+          message = String.format(direction, degreesFromZ);
+        }
+
       }
-//
-//      message += ". " + String.format("%.2f, %.2f, %.2f, %.2f", localTranslation.qx(), localTranslation.qy(), localTranslation.qz(), localTranslation.qw());
 
+      message += String.format(" move %.2f meters", dist3);
+
+//      message += "Dist: " + String.format("%.2f %.2f %.2f ", dist, dist2, dist3);
+//
+//      message += String.format("%.2f, %.2f, %.2f", targetDir[0], targetDir[1], targetDir[2]);
+
+
+//
+//      message += offsetPose.toString();
+//
+//      if (x < 0) {
+//        message += " to your right: " + String.format("%.2f", x);
+//      } else if (x > 0) {
+//        message += " to your left: " + String.format("%.2f", x);
+//      }
 
     }
     if (camera.getTrackingState() == TrackingState.PAUSED) {
