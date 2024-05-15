@@ -532,21 +532,32 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
       // First, get the current position, including camera rotation (we need to know if you are
       // facing twds or away)
       Pose cameraPose = camera.getDisplayOrientedPose();
+      float[] cameraQuat = cameraPose.getRotationQuaternion();
+      // Can we undo z axis rotation just by negating it? Seems like yes!
+      Pose inverseZRotation = Pose.makeRotation(0, 0, -cameraQuat[2], cameraQuat[3]);
+      cameraPose = cameraPose.compose(inverseZRotation);
+//      Log.d("quat", String.format("%.2f, %.2f, %.2f, %.2f", cameraQuat[0], cameraQuat[1], cameraQuat[2], cameraQuat[3]));
 
-      // This is the 3D camera point in world coordinates.
-      float[] cameraPt = {0, 0, 0};
-      cameraPt = cameraPose.transformPoint(cameraPt);
+//      // This is the 3D camera point in world coordinates.
+//      float[] cameraPt = {0, 0, 0};
+//      cameraPt = cameraPose.transformPoint(cameraPt);
 
-      // This is the way the camera is looking:
-      // If it's (0, 0, -1) in camera coordinates, we can get it here
-      // in world coordinates.
-      float[] cameraDir = {0, 0, -1};
-      cameraDir = cameraPose.transformPoint(cameraDir);
-      // We can normalize it.
-      double cameraDirSum = Math.sqrt(Math.pow(cameraDir[0], 2) + Math.pow(cameraDir[1], 2) + Math.pow(cameraDir[2], 2));
-      cameraDir[0] /= cameraDirSum;
-      cameraDir[1] /= cameraDirSum;
-      cameraDir[2] /= cameraDirSum;
+      // TODO:
+      // I want to left-multiply by a rotation matrix that is made from the negative z rotation
+      // of the camera to get a camera that's in portrait mode.
+      // I can figure out what the target z rotation is from printing a portrait mode camera
+      // pose and go from there.
+
+//      // This is the way the camera is looking:
+//      // If it's (0, 0, -1) in camera coordinates, we can get it here
+//      // in world coordinates.
+//      float[] cameraDir = {0, 0, -1};
+//      cameraDir = cameraPose.transformPoint(cameraDir);
+//      // We can normalize it.
+//      double cameraDirSum = Math.sqrt(Math.pow(cameraDir[0], 2) + Math.pow(cameraDir[1], 2) + Math.pow(cameraDir[2], 2));
+//      cameraDir[0] /= cameraDirSum;
+//      cameraDir[1] /= cameraDirSum;
+//      cameraDir[2] /= cameraDirSum;
 
       // I want to get the difference in x and z from the camera to the (target point or ray?)
       // let's start with the target point.
@@ -563,8 +574,8 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
       // In other words, how much x, y and z from the current camera position if the current
       // is (0, 0, 0).
       float[] targetDir = cameraPose.inverse().transformPoint(targetPt);
-      double targetDirSum = Math.sqrt(Math.pow(targetDir[0], 2) + Math.pow(targetDir[1], 2) + Math.pow(targetDir[2], 2));
-      double[] targetDirNorm = {targetDir[0] / targetDirSum, targetDir[1] / targetDirSum, targetDir[2] / targetDirSum};
+//      double targetDirSum = Math.sqrt(Math.pow(targetDir[0], 2) + Math.pow(targetDir[1], 2) + Math.pow(targetDir[2], 2));
+//      double[] targetDirNorm = {targetDir[0] / targetDirSum, targetDir[1] / targetDirSum, targetDir[2] / targetDirSum};
 
 //      Log.d("pts", String.format("%.2f, %.2f, %.2f; %.2f, %.2f, %.2f; \t %.2f, %.2f, %.2f",
 //              cameraPt[0], cameraPt[1], cameraPt[2], targetPt[0], targetPt[1], targetPt[2],
@@ -584,29 +595,29 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
       // We only care about x and z, y (the height) isn't important for walking straight.
 
 
-      // Project the camera down onto the xz plane. Then we can ignore y.
-      Pose xzCameraPose = cameraPose.extractTranslation().compose(Pose.makeTranslation(0, -cameraPose.ty(), 0)).compose(cameraPose.extractRotation().inverse());
-      Pose xzTargetPose = targetPose.compose(Pose.makeTranslation(0, -targetPose.ty(), 0));
+//      // Project the camera down onto the xz plane. Then we can ignore y.
+//      Pose xzCameraPose = cameraPose.extractTranslation().compose(Pose.makeTranslation(0, -cameraPose.ty(), 0)).compose(cameraPose.extractRotation().inverse());
+//      Pose xzTargetPose = targetPose.compose(Pose.makeTranslation(0, -targetPose.ty(), 0));
 
-      // Calculate the target's pose in camera coordinates.
-      // This gives 2D rotation and translation.
-      Pose offsetPose = xzCameraPose.inverse().compose(xzTargetPose);
-
-      float q_y = offsetPose.qy();
-      float z = offsetPose.tz(); // how much straight to go once oriented correctly
-      float x = offsetPose.tx(); // how much left to go (may be negative)
-
-      float dist = (float) (Math.sqrt(x * x + z * z));
-
-      // Alternative dist calculation.
-      float xdist = targetPose.tx() - cameraPose.tx();
-      float zdist = targetPose.tz() - cameraPose.tz();
-      float dist2 = (float) (Math.sqrt(xdist * xdist + zdist * zdist));
+//      // Calculate the target's pose in camera coordinates.
+//      // This gives 2D rotation and translation.
+//      Pose offsetPose = xzCameraPose.inverse().compose(xzTargetPose);
+//
+//      float q_y = offsetPose.qy();
+//      float z = offsetPose.tz(); // how much straight to go once oriented correctly
+//      float x = offsetPose.tx(); // how much left to go (may be negative)
+//
+//      float dist = (float) (Math.sqrt(x * x + z * z));
+//
+//      // Alternative dist calculation.
+//      float xdist = targetPose.tx() - cameraPose.tx();
+//      float zdist = targetPose.tz() - cameraPose.tz();
+//      float dist2 = (float) (Math.sqrt(xdist * xdist + zdist * zdist));
 
       // Try from world-space points too.
       // Only need x and z coordinates (x/z plane is the plane of interest). We'll ignore y.
       // TODO: This only works if the camera isn't rotated along the z axis, e.g. it's portrait mode.
-      // I should be able to do better but can't bother right now.
+      // I should be able to do better but can't right now.
       float tx = targetDir[0];
       float tz = targetDir[2];
       float dist3 = (float) (Math.sqrt(Math.pow(tx, 2) + Math.pow(tz, 2)));
