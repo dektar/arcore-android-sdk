@@ -532,82 +532,8 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
       // First, get the current position, including camera rotation (we need to know if you are
       // facing twds or away)
       Pose cameraPose = camera.getDisplayOrientedPose();
-      float[] cameraQuat = cameraPose.getRotationQuaternion();
-      // Can we undo z axis rotation just by negating it? Seems like NO!
-      // This converts landscape or rotated camera into vertical camera coordinates,
-      // effectively making the x-z plane the horizontal plane. Then we can operate on just the
-      // x-z plane when giving instructions.
-//      Pose inverseZRotation = Pose.makeRotation(0, 0, -cameraQuat[2], cameraQuat[3]);
-//      cameraPose = cameraPose.compose(inverseZRotation);
-//      Log.d("quat", String.format("%.2f, %.2f, %.2f, %.2f", cameraQuat[0], cameraQuat[1], cameraQuat[2], cameraQuat[3]));
 
-
-
-      // https://eecs.qmul.ac.uk/~gslabaugh/publications/euler.pdf
-//      float[] cameraRot = new float[16];
-//      cameraPose.extractRotation().toMatrix(cameraRot, 0);
-//      float cr11 = cameraRot[0];
-//      float cr12 = cameraRot[1];
-//      float cr13 = cameraRot[2];
-//      float cr21 = cameraRot[4];
-//      float cr22 = cameraRot[5];
-//      float cr23 = cameraRot[6];
-//      float cr31 = cameraRot[8];
-//      float cr32 = cameraRot[9];
-//      float cr33 = cameraRot[10];
-//
-//      double psi; // x axis
-//      double theta; // y axis
-//      double phi; // z axis
-//      if (cr31 == 1 || cr31 == -1) {
-//        phi = 0;
-//        if (cr31 == -1) {
-//          theta = Math.PI / 2;
-//          psi = Math.atan2(cr12, cr13);
-//        } else {
-//          theta = Math.PI / -2;
-//          psi = Math.atan2(cr12 * -1, cr13 * -1);
-//        }
-//      } else {
-//        theta = Math.asin(cr31) * -1.0;
-//        double one_over_cos_theta = 1 / Math.cos(theta);
-//        phi = Math.atan2(cr32 * one_over_cos_theta, cr33 * one_over_cos_theta);
-//        psi = Math.atan2(cr21 * one_over_cos_theta, cr11 * one_over_cos_theta);
-//      }
-//      Log.d("angles", String.format("%.2f, %.2f, %.2f", psi, theta, phi));
-
-      float qx = cameraQuat[0];
-      float qy = cameraQuat[1];
-      float qz = cameraQuat[2];
-      float qw = cameraQuat[3];
-
-      double phi = Math.atan2(2 * (qw * qx + qy * qz), 1 - 2 * (qx * qx + qy * qy)); // x
-      double theta = -Math.PI / 2 + 2 * Math.atan2(Math.sqrt(1 + 2 * (qw * qy - qx * qz)),
-                                            Math.sqrt(1 - 2 * (qw * qy - qx * qz))); // y
-      double psi = Math.atan2(2 * (qw * qz + qx * qy), 1 - 2 * (qy * qy + qz * qz)); // z
-//      Log.d("angles2", String.format("%.2f, %.2f, %.2f", psi, theta, phi));
-
-
-      // Create a new rotation quat that's based on just phi and theta, with psi = 0.
-      psi = -1 * psi;
-      phi = 0;
-      theta = 0;
-      double cr = Math.cos(phi * 0.5);
-      double sr = Math.sin(phi * 0.5);
-      double cp = Math.cos(theta * 0.5);
-      double sp = Math.sin(theta * 0.5);
-      double cy = Math.cos(psi * 0.5);
-      double sy = Math.sin(psi * 0.5);
-
-      qw = (float) (cr * cp * cy + sr * sp * sy);
-      qx = (float) (sr * cp * cy - cr * sp * sy);
-      qy = (float) (cr * sp * cy + sr * cp * sy);
-      qz = (float) (cr * cp * sy - sr * sp * cy);
-
-      Pose newRotation = Pose.makeRotation(qx, qy, qz, qw);
-      cameraPose = cameraPose.compose(newRotation);
-
-
+      cameraPose = makePortraitOrientedCameraPose(cameraPose);
 
 //      // This is the 3D camera point in world coordinates.
 //      float[] cameraPt = {0, 0, 0};
@@ -838,6 +764,84 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
     backgroundRenderer.drawVirtualScene(render, virtualSceneFramebuffer, Z_NEAR, Z_FAR);
   }
 
+  private Pose makePortraitOrientedCameraPose(Pose cameraPose) {
+
+    float[] cameraQuat = cameraPose.getRotationQuaternion();
+    // Can we undo z axis rotation just by negating it? Seems like NO!
+    // This converts landscape or rotated camera into vertical camera coordinates,
+    // effectively making the x-z plane the horizontal plane. Then we can operate on just the
+    // x-z plane when giving instructions.
+//      Pose inverseZRotation = Pose.makeRotation(0, 0, -cameraQuat[2], cameraQuat[3]);
+//      cameraPose = cameraPose.compose(inverseZRotation);
+//      Log.d("quat", String.format("%.2f, %.2f, %.2f, %.2f", cameraQuat[0], cameraQuat[1], cameraQuat[2], cameraQuat[3]));
+
+
+
+    // https://eecs.qmul.ac.uk/~gslabaugh/publications/euler.pdf
+//      float[] cameraRot = new float[16];
+//      cameraPose.extractRotation().toMatrix(cameraRot, 0);
+//      float cr11 = cameraRot[0];
+//      float cr12 = cameraRot[1];
+//      float cr13 = cameraRot[2];
+//      float cr21 = cameraRot[4];
+//      float cr22 = cameraRot[5];
+//      float cr23 = cameraRot[6];
+//      float cr31 = cameraRot[8];
+//      float cr32 = cameraRot[9];
+//      float cr33 = cameraRot[10];
+//
+//      double psi; // x axis
+//      double theta; // y axis
+//      double phi; // z axis
+//      if (cr31 == 1 || cr31 == -1) {
+//        phi = 0;
+//        if (cr31 == -1) {
+//          theta = Math.PI / 2;
+//          psi = Math.atan2(cr12, cr13);
+//        } else {
+//          theta = Math.PI / -2;
+//          psi = Math.atan2(cr12 * -1, cr13 * -1);
+//        }
+//      } else {
+//        theta = Math.asin(cr31) * -1.0;
+//        double one_over_cos_theta = 1 / Math.cos(theta);
+//        phi = Math.atan2(cr32 * one_over_cos_theta, cr33 * one_over_cos_theta);
+//        psi = Math.atan2(cr21 * one_over_cos_theta, cr11 * one_over_cos_theta);
+//      }
+//      Log.d("angles", String.format("%.2f, %.2f, %.2f", psi, theta, phi));
+
+    // https://en.wikipedia.org/wiki/Conversion_between_quaternions_and_Euler_angles
+    float qx = cameraQuat[0];
+    float qy = cameraQuat[1];
+    float qz = cameraQuat[2];
+    float qw = cameraQuat[3];
+
+    double phi = Math.atan2(2 * (qw * qx + qy * qz), 1 - 2 * (qx * qx + qy * qy));
+    double theta = -Math.PI / 2 + 2 * Math.atan2(Math.sqrt(1 + 2 * (qw * qy - qx * qz)),
+            Math.sqrt(1 - 2 * (qw * qy - qx * qz))); // y
+    double psi = Math.atan2(2 * (qw * qz + qx * qy), 1 - 2 * (qy * qy + qz * qz)); // z
+//      Log.d("angles2", String.format("%.2f, %.2f, %.2f", psi, theta, phi));
+
+    // Create a new rotation quaternion that's based on just phi and theta, with psi = 0.
+    psi = -1 * psi;
+    phi = 0;
+    theta = 0;
+    double cr = Math.cos(phi * 0.5);
+    double sr = Math.sin(phi * 0.5);
+    double cp = Math.cos(theta * 0.5);
+    double sp = Math.sin(theta * 0.5);
+    double cy = Math.cos(psi * 0.5);
+    double sy = Math.sin(psi * 0.5);
+
+    qw = (float) (cr * cp * cy + sr * sp * sy);
+    qx = (float) (sr * cp * cy - cr * sp * sy);
+    qy = (float) (cr * sp * cy + sr * cp * sy);
+    qz = (float) (cr * cp * sy - sr * sp * cy);
+
+    Pose newRotation = Pose.makeRotation(qx, qy, qz, qw);
+    return cameraPose.compose(newRotation);
+  }
+
   // Handle only one tap per frame, as taps are usually low frequency compared to frame rate.
   private void handleTap(Frame frame, Camera camera) {
     MotionEvent tap = tapHelper.poll();
@@ -864,8 +868,9 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
     // Extracting translation means that I lose the orientation of the camera, which is OK,
     // it makes my tracking object appear vertical.
     Pose cameraPose = camera.getDisplayOrientedPose();
+    cameraPose = makePortraitOrientedCameraPose(cameraPose);
     Pose cameraTranslation = cameraPose.extractTranslation();
-    wrappedAnchors.add(new WrappedAnchor(session.createAnchor(cameraTranslation), null));
+    wrappedAnchors.add(new WrappedAnchor(session.createAnchor(cameraPose), null));
 
     // Now create the target direction point.
 
@@ -883,7 +888,7 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
     targetPose = targetPose.compose(Pose.makeTranslation(0, cameraTranslation.ty() - targetPose.ty(), 0));
 
     // Can we find interpolation that makes it 2m away?
-    targetPose = Pose.makeInterpolated(cameraPose, targetPose, .5f);
+//    targetPose = Pose.makeInterpolated(cameraPose, targetPose, .5f);
     // Would be better to have a fixed distance away rather than projecting it back down
     // but this is OK for now.
 
