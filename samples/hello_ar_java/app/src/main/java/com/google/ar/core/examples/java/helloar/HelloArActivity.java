@@ -606,10 +606,10 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
 //
 //      float dist = (float) (Math.sqrt(x * x + z * z));
 //
-//      // Alternative dist calculation.
-//      float xdist = targetPose.tx() - cameraPose.tx();
-//      float zdist = targetPose.tz() - cameraPose.tz();
-//      float dist2 = (float) (Math.sqrt(xdist * xdist + zdist * zdist));
+      // Alternative dist calculation.
+      float xdist = targetPose.tx() - cameraPose.tx();
+      float zdist = targetPose.tz() - cameraPose.tz();
+      float dist2 = (float) (Math.sqrt(xdist * xdist + zdist * zdist));
 
       // Try from world-space points too.
       // Only need x and z coordinates (x/z plane is the plane of interest). We'll ignore y.
@@ -646,7 +646,7 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
 
       }
 
-      message += String.format(" move %.2f meters", dist3);
+      message += String.format(" move %.2f meters", dist2);
 
 //      message += "Dist: " + String.format("%.2f %.2f %.2f ", dist, dist2, dist3);
 //
@@ -764,6 +764,8 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
     backgroundRenderer.drawVirtualScene(render, virtualSceneFramebuffer, Z_NEAR, Z_FAR);
   }
 
+  // Removes z-axis rotation from the Pose.
+  // Doesn't modify x or y axis rotation.
   private Pose makePortraitOrientedCameraPose(Pose cameraPose) {
 
     float[] cameraQuat = cameraPose.getRotationQuaternion();
