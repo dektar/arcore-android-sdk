@@ -533,10 +533,81 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
       // facing twds or away)
       Pose cameraPose = camera.getDisplayOrientedPose();
       float[] cameraQuat = cameraPose.getRotationQuaternion();
-      // Can we undo z axis rotation just by negating it? Seems like yes!
-      Pose inverseZRotation = Pose.makeRotation(0, 0, -cameraQuat[2], cameraQuat[3]);
-      cameraPose = cameraPose.compose(inverseZRotation);
+      // Can we undo z axis rotation just by negating it? Seems like NO!
+      // This converts landscape or rotated camera into vertical camera coordinates,
+      // effectively making the x-z plane the horizontal plane. Then we can operate on just the
+      // x-z plane when giving instructions.
+//      Pose inverseZRotation = Pose.makeRotation(0, 0, -cameraQuat[2], cameraQuat[3]);
+//      cameraPose = cameraPose.compose(inverseZRotation);
 //      Log.d("quat", String.format("%.2f, %.2f, %.2f, %.2f", cameraQuat[0], cameraQuat[1], cameraQuat[2], cameraQuat[3]));
+
+
+
+      // https://eecs.qmul.ac.uk/~gslabaugh/publications/euler.pdf
+//      float[] cameraRot = new float[16];
+//      cameraPose.extractRotation().toMatrix(cameraRot, 0);
+//      float cr11 = cameraRot[0];
+//      float cr12 = cameraRot[1];
+//      float cr13 = cameraRot[2];
+//      float cr21 = cameraRot[4];
+//      float cr22 = cameraRot[5];
+//      float cr23 = cameraRot[6];
+//      float cr31 = cameraRot[8];
+//      float cr32 = cameraRot[9];
+//      float cr33 = cameraRot[10];
+//
+//      double psi; // x axis
+//      double theta; // y axis
+//      double phi; // z axis
+//      if (cr31 == 1 || cr31 == -1) {
+//        phi = 0;
+//        if (cr31 == -1) {
+//          theta = Math.PI / 2;
+//          psi = Math.atan2(cr12, cr13);
+//        } else {
+//          theta = Math.PI / -2;
+//          psi = Math.atan2(cr12 * -1, cr13 * -1);
+//        }
+//      } else {
+//        theta = Math.asin(cr31) * -1.0;
+//        double one_over_cos_theta = 1 / Math.cos(theta);
+//        phi = Math.atan2(cr32 * one_over_cos_theta, cr33 * one_over_cos_theta);
+//        psi = Math.atan2(cr21 * one_over_cos_theta, cr11 * one_over_cos_theta);
+//      }
+//      Log.d("angles", String.format("%.2f, %.2f, %.2f", psi, theta, phi));
+
+      float qx = cameraQuat[0];
+      float qy = cameraQuat[1];
+      float qz = cameraQuat[2];
+      float qw = cameraQuat[3];
+
+      double phi = Math.atan2(2 * (qw * qx + qy * qz), 1 - 2 * (qx * qx + qy * qy)); // x
+      double theta = -Math.PI / 2 + 2 * Math.atan2(Math.sqrt(1 + 2 * (qw * qy - qx * qz)),
+                                            Math.sqrt(1 - 2 * (qw * qy - qx * qz))); // y
+      double psi = Math.atan2(2 * (qw * qz + qx * qy), 1 - 2 * (qy * qy + qz * qz)); // z
+//      Log.d("angles2", String.format("%.2f, %.2f, %.2f", psi, theta, phi));
+
+
+      // Create a new rotation quat that's based on just phi and theta, with psi = 0.
+      psi = -1 * psi;
+      phi = 0;
+      theta = 0;
+      double cr = Math.cos(phi * 0.5);
+      double sr = Math.sin(phi * 0.5);
+      double cp = Math.cos(theta * 0.5);
+      double sp = Math.sin(theta * 0.5);
+      double cy = Math.cos(psi * 0.5);
+      double sy = Math.sin(psi * 0.5);
+
+      qw = (float) (cr * cp * cy + sr * sp * sy);
+      qx = (float) (sr * cp * cy - cr * sp * sy);
+      qy = (float) (cr * sp * cy + sr * cp * sy);
+      qz = (float) (cr * cp * sy - sr * sp * cy);
+
+      Pose newRotation = Pose.makeRotation(qx, qy, qz, qw);
+      cameraPose = cameraPose.compose(newRotation);
+
+
 
 //      // This is the 3D camera point in world coordinates.
 //      float[] cameraPt = {0, 0, 0};
@@ -639,9 +710,9 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
           message = "Go straight and";
         } else {
 
-          String direction = "Turn left by %.2f degrees, then";
+          String direction = "Turn left by %.0f degrees, then";
           if (degreesFromX < 0) {
-            direction = "Turn right by %.2f degrees, then";
+            direction = "Turn right by %.0f degrees, then";
           }
 
           message = String.format(direction, degreesFromZ);
@@ -783,6 +854,7 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
       wrappedAnchors.remove(0);
     }
 
+
     // Also this, although it assumes the phone is oriented properly?
     // Can we make translation in the world Z and not camera Z? Does this do that?
     // Would be great if we could look out ahead of the camera instead of tapping the right
@@ -800,17 +872,41 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
     // Doing this creates something down the camera's Z axis, which depends on the
     // phone orientation. If the phone is in portrait mode, it's to the left horizontally.
     // So it's not with respect to the world.
-    // Pose cameraRelativePose = camera.getPose().makeTranslation(0.0f, 0.0f, -1.0f);
+//     Pose cameraRelativePose = camera.getPose().makeTranslation(0.0f, 0.0f, -1.0f);
 
     // This makes a world-space translation against the camera's current position.
     // I could theoretically use a hit test to decide how far away (-3 m is a bit far for my house).
     // getDisplayOrientedPose is aware of the display direction but is functionally the same for me (just rotated from getPose)
     // put it somewhere in front of the camera
     Pose targetPose = cameraPose.compose(Pose.makeTranslation(0, 0, -2.0f)).extractTranslation();
-    // bring it back down to same height as camera
+//    // bring it back down to same height as camera
     targetPose = targetPose.compose(Pose.makeTranslation(0, cameraTranslation.ty() - targetPose.ty(), 0));
+
+    // Can we find interpolation that makes it 2m away?
+    targetPose = Pose.makeInterpolated(cameraPose, targetPose, .5f);
     // Would be better to have a fixed distance away rather than projecting it back down
     // but this is OK for now.
+
+//
+//    float[] cameraQuat = cameraPose.getRotationQuaternion();
+//    // Undo z axis rotation just by negating it.
+//    // This converts landscape or rotated camera into vertical camera coordinates,
+//    // effectively making the x-z plane the horizontal plane.
+//    Pose inverseZRotation = Pose.makeRotation(0, 0, -cameraQuat[2], cameraQuat[3]);
+//    cameraPose = cameraPose.compose(inverseZRotation);
+//
+//////    // Undo x axis rotation (tilt up/down) by negating it. This makes the camera
+//////    // straight ahead.
+//////    cameraQuat = cameraPose.getRotationQuaternion();
+//////    Pose inverseXRotation = Pose.makeRotation(-cameraQuat[0], 0, 0, cameraQuat[3]);
+//////    cameraPose = cameraPose.compose(inverseXRotation);
+////
+//    wrappedAnchors.add(new WrappedAnchor(session.createAnchor(cameraPose), null));
+//
+//    // Translate 2m in front of the rotated camera frame.
+//    Pose targetPose = cameraPose.compose(Pose.makeTranslation(0, 0, -2.0f)).extractTranslation();
+//    targetPose = targetPose.compose(Pose.makeTranslation(0, cameraPose.ty() - targetPose.ty(), 0));
+
     wrappedAnchors.add(new WrappedAnchor(session.createAnchor(targetPose), null));
 
     // I don't need the trackable if I don't use instant placement!!
