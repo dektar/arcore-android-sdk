@@ -94,7 +94,7 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
   private static final String TAG = HelloArActivity.class.getSimpleName();
 
   private static final String SEARCHING_PLANE_MESSAGE = "Searching for surfaces...";
-  private static final String WAITING_FOR_TAP_MESSAGE = "Tap on a surface to place an object.";
+  private static final String WAITING_FOR_TAP_MESSAGE = "Tap on the screen to place a target.";
 
   // See the definition of updateSphericalHarmonicsCoefficients for an explanation of these
   // constants.
@@ -115,6 +115,8 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
 
   private static final int CUBEMAP_RESOLUTION = 16;
   private static final int CUBEMAP_NUMBER_OF_IMPORTANCE_SAMPLES = 32;
+
+  private static final float TARGET_DISTANCE_ALONG_RAY = 2.0f;
 
   // Rendering. The Renderers are created here, and initialized when the GL surface is created.
   private GLSurfaceView surfaceView;
@@ -516,8 +518,6 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
     }
 
     // Handle one tap per frame.
-    // TODO: Could we use the depth image to set the target point as far away as possible?
-    // TODO: If the depth changes can we move the target point further along the same ray?
     handleTap(frame, camera);
 
     // Keep the screen unlocked while tracking, but allow it to lock when tracking stops.
@@ -527,141 +527,7 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
     // has placed any objects.
     String message = null;
     if (wrappedAnchors.size() == 2 && camera.getTrackingState() == TrackingState.TRACKING) {
-      // TODO: Get diff between current camera pose and target ray / point, and instruct the user
-      // how to go in the right direction in world coordinates.
-      // First, get the current position, including camera rotation (we need to know if you are
-      // facing twds or away)
-      Pose cameraPose = camera.getDisplayOrientedPose();
-
-      cameraPose = makePortraitOrientedCameraPose(cameraPose);
-
-//      // This is the 3D camera point in world coordinates.
-//      float[] cameraPt = {0, 0, 0};
-//      cameraPt = cameraPose.transformPoint(cameraPt);
-
-      // TODO:
-      // I want to left-multiply by a rotation matrix that is made from the negative z rotation
-      // of the camera to get a camera that's in portrait mode.
-      // I can figure out what the target z rotation is from printing a portrait mode camera
-      // pose and go from there.
-
-//      // This is the way the camera is looking:
-//      // If it's (0, 0, -1) in camera coordinates, we can get it here
-//      // in world coordinates.
-//      float[] cameraDir = {0, 0, -1};
-//      cameraDir = cameraPose.transformPoint(cameraDir);
-//      // We can normalize it.
-//      double cameraDirSum = Math.sqrt(Math.pow(cameraDir[0], 2) + Math.pow(cameraDir[1], 2) + Math.pow(cameraDir[2], 2));
-//      cameraDir[0] /= cameraDirSum;
-//      cameraDir[1] /= cameraDirSum;
-//      cameraDir[2] /= cameraDirSum;
-
-      // I want to get the difference in x and z from the camera to the (target point or ray?)
-      // let's start with the target point.
-      // TODO: Later let's get the ray from start to end, find the closet point along that ray,
-      // and then aim about 2-3 meters in front of it.
-      WrappedAnchor target = wrappedAnchors.get(1);
-      Pose targetPose = target.getAnchor().getPose();
-
-      // This is the world-space coordinates of the target point.
-      float[] targetPt = {0, 0, 0};
-      targetPt = targetPose.transformPoint(targetPt);
-
-      // This is where I want the camera to be *in camera coordinates*.
-      // In other words, how much x, y and z from the current camera position if the current
-      // is (0, 0, 0).
-      float[] targetDir = cameraPose.inverse().transformPoint(targetPt);
-//      double targetDirSum = Math.sqrt(Math.pow(targetDir[0], 2) + Math.pow(targetDir[1], 2) + Math.pow(targetDir[2], 2));
-//      double[] targetDirNorm = {targetDir[0] / targetDirSum, targetDir[1] / targetDirSum, targetDir[2] / targetDirSum};
-
-//      Log.d("pts", String.format("%.2f, %.2f, %.2f; %.2f, %.2f, %.2f; \t %.2f, %.2f, %.2f",
-//              cameraPt[0], cameraPt[1], cameraPt[2], targetPt[0], targetPt[1], targetPt[2],
-//              targetDir[0], targetDir[1], targetDir[2]));
-
-
-      // Ignore the rotation offset, we only care about getting to the right point, not
-      // getting the orientation at that point.
-//      Pose localTranslation = offsetPose.extractTranslation();
-
-      // Convert back into local camera coordinates.
-//      Pose localTranslation = offsetTranslation.inverse().compose(cameraPose);
-
-      // Now the quat shows rotation left/right in y, tilt left/right in z, and tilt forward/back in x.
-      // we only care about rotation left/right in y, this is looking left/right.
-      // Now the translation shows how far to go in x, y and z until we reach the point.
-      // We only care about x and z, y (the height) isn't important for walking straight.
-
-
-//      // Project the camera down onto the xz plane. Then we can ignore y.
-//      Pose xzCameraPose = cameraPose.extractTranslation().compose(Pose.makeTranslation(0, -cameraPose.ty(), 0)).compose(cameraPose.extractRotation().inverse());
-//      Pose xzTargetPose = targetPose.compose(Pose.makeTranslation(0, -targetPose.ty(), 0));
-
-//      // Calculate the target's pose in camera coordinates.
-//      // This gives 2D rotation and translation.
-//      Pose offsetPose = xzCameraPose.inverse().compose(xzTargetPose);
-//
-//      float q_y = offsetPose.qy();
-//      float z = offsetPose.tz(); // how much straight to go once oriented correctly
-//      float x = offsetPose.tx(); // how much left to go (may be negative)
-//
-//      float dist = (float) (Math.sqrt(x * x + z * z));
-//
-      // Alternative dist calculation.
-      float xdist = targetPose.tx() - cameraPose.tx();
-      float zdist = targetPose.tz() - cameraPose.tz();
-      float dist2 = (float) (Math.sqrt(xdist * xdist + zdist * zdist));
-
-      // Try from world-space points too.
-      // Only need x and z coordinates (x/z plane is the plane of interest). We'll ignore y.
-      // TODO: This only works if the camera isn't rotated along the z axis, e.g. it's portrait mode.
-      // I should be able to do better but can't right now.
-      float tx = targetDir[0];
-      float tz = targetDir[2];
-      float dist3 = (float) (Math.sqrt(Math.pow(tx, 2) + Math.pow(tz, 2)));
-
-      if (dist3 < .1f) {
-        // Close enough.
-        message = "You did it!";
-      } else {
-        double thetaFromZ = Math.acos(-tz / dist3);
-        double thetaFromX = Math.PI / 2 - Math.acos(-tx / dist3);
-        double degreesFromX = (thetaFromX * 360 / (2 * Math.PI)) % 360;
-        double degreesFromZ = (thetaFromZ * 360 / (2 * Math.PI)) % 360;
-
-        // 0 is straight ahead
-        // 180 or -180 (e.g. degreesFromX < 0) is straight behind
-        // 90 is at 3, -90 is at 9 on a clock
-
-        if (degreesFromZ < 1) {
-          message = "Go straight and";
-        } else {
-
-          String direction = "Turn left by %.0f degrees, then";
-          if (degreesFromX < 0) {
-            direction = "Turn right by %.0f degrees, then";
-          }
-
-          message = String.format(direction, degreesFromZ);
-        }
-
-      }
-
-      message += String.format(" move %.2f meters", dist2);
-
-//      message += "Dist: " + String.format("%.2f %.2f %.2f ", dist, dist2, dist3);
-//
-//      message += String.format("%.2f, %.2f, %.2f", targetDir[0], targetDir[1], targetDir[2]);
-
-
-//
-//      message += offsetPose.toString();
-//
-//      if (x < 0) {
-//        message += " to your right: " + String.format("%.2f", x);
-//      } else if (x > 0) {
-//        message += " to your left: " + String.format("%.2f", x);
-//      }
-
+      message = getMessageForCurrentCameraPose(camera);
     }
     if (camera.getTrackingState() == TrackingState.PAUSED) {
       if (camera.getTrackingFailureReason() == TrackingFailureReason.NONE) {
@@ -764,53 +630,144 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
     backgroundRenderer.drawVirtualScene(render, virtualSceneFramebuffer, Z_NEAR, Z_FAR);
   }
 
+  private String getMessageForCurrentCameraPose(Camera camera) {
+    // TODO: Could we use the depth image to set the target point as far away as possible?
+
+    String message = "";
+
+    // Get diff between current camera pose and target ray / point, and instruct the user
+    // how to go in the right direction in world coordinates.
+    // First, get the current position, including camera rotation (we need to know if you are
+    // facing twds or away)
+    Pose cameraPose = camera.getDisplayOrientedPose();
+
+    // Undo any z-axis rotation. We still have y rotation (left/right) and x rotation (up/down).
+    cameraPose = makePortraitOrientedCameraPose(cameraPose);
+
+
+    WrappedAnchor target = wrappedAnchors.get(1);
+    Pose targetPose = target.getAnchor().getPose();
+
+    // First update the target pose to be on the ray between camera and target pose,
+    // but 2 meters ahead of the camera pose at the closest point between the camera and
+    // the target.
+    // TODO: If the depth changes can we move the target point further along the same ray?
+
+    float[] cameraPt = {0, 0, 0};
+    cameraPt = cameraPose.transformPoint(cameraPt);
+
+    // getTargetPoseAtNMeters will work if I can move the CameraPose forward along
+    // its z.
+    // Try to get the new camera pose in original camera coordinates to determine the z axis
+    // offset. Then move the pose 2 meters ahead of that offset.
+    Pose origCameraPose = wrappedAnchors.get(0).getAnchor().getPose();
+    float[] newCameraPositionInOrigSpace = origCameraPose.inverse().transformPoint(cameraPt);
+    targetPose = getTargetPoseAtNMeters(origCameraPose, targetPose, newCameraPositionInOrigSpace[2] - TARGET_DISTANCE_ALONG_RAY);
+
+    // Update the wrapped anchor. This is probably not a good performance idea and I should
+    // do it less frequently.
+    wrappedAnchors.get(1).getAnchor().detach();
+    wrappedAnchors.remove(1);
+    wrappedAnchors.add(new WrappedAnchor(session.createAnchor(targetPose), null));
+
+    // This creates the world-space coordinates of the target point.
+    float[] targetPt = {0, 0, 0};
+    targetPt = targetPose.transformPoint(targetPt);
+
+    // This is where I want the camera to be *in camera coordinates*.
+    // In other words, how much x, y and z from the current camera position if the current
+    // is (0, 0, 0).
+    float[] targetDir = cameraPose.inverse().transformPoint(targetPt);
+//      double targetDirSum = Math.sqrt(Math.pow(targetDir[0], 2) + Math.pow(targetDir[1], 2) + Math.pow(targetDir[2], 2));
+//      double[] targetDirNorm = {targetDir[0] / targetDirSum, targetDir[1] / targetDirSum, targetDir[2] / targetDirSum};
+
+//      Log.d("pts", String.format("%.2f, %.2f, %.2f; %.2f, %.2f, %.2f; \t %.2f, %.2f, %.2f",
+//              cameraPt[0], cameraPt[1], cameraPt[2], targetPt[0], targetPt[1], targetPt[2],
+//              targetDir[0], targetDir[1], targetDir[2]));
+
+
+    // Ignore the rotation offset, we only care about getting to the right point, not
+    // getting the orientation at that point.
+//      Pose localTranslation = offsetPose.extractTranslation();
+
+    // Convert back into local camera coordinates.
+//      Pose localTranslation = offsetTranslation.inverse().compose(cameraPose);
+
+    // Now the quat shows rotation left/right in y, tilt left/right in z, and tilt forward/back in x.
+    // we only care about rotation left/right in y, this is looking left/right.
+    // Now the translation shows how far to go in x, y and z until we reach the point.
+    // We only care about x and z, y (the height) isn't important for walking straight.
+
+
+//      // Project the camera down onto the xz plane. Then we can ignore y.
+//      Pose xzCameraPose = cameraPose.extractTranslation().compose(Pose.makeTranslation(0, -cameraPose.ty(), 0)).compose(cameraPose.extractRotation().inverse());
+//      Pose xzTargetPose = targetPose.compose(Pose.makeTranslation(0, -targetPose.ty(), 0));
+
+//      // Calculate the target's pose in camera coordinates.
+//      // This gives 2D rotation and translation.
+//      Pose offsetPose = xzCameraPose.inverse().compose(xzTargetPose);
+//
+//      float q_y = offsetPose.qy();
+//      float z = offsetPose.tz(); // how much straight to go once oriented correctly
+//      float x = offsetPose.tx(); // how much left to go (may be negative)
+//
+//      float dist = (float) (Math.sqrt(x * x + z * z));
+//
+
+    float xdist1 = targetPt[0] - cameraPt[0];
+    float zdist1 = targetPt[2] - cameraPt[2];
+    float dist1 = (float) (Math.sqrt(xdist1 * xdist1 + zdist1 * zdist1));
+
+    // Dist calculation: get the distance between the translation of the two poses.
+    float xdist = targetPose.tx() - cameraPose.tx();
+    float zdist = targetPose.tz() - cameraPose.tz();
+    float dist2 = (float) (Math.sqrt(xdist * xdist + zdist * zdist));
+
+    // Try from world-space points.
+    // Only need x and z coordinates (x/z plane is the plane of interest). We'll ignore y.
+    // targetDir takes into account the way we are *facing* and not just the point in space.
+    float tx = targetDir[0];
+    float tz = targetDir[2];
+    float dist3 = (float) (Math.sqrt(Math.pow(tx, 2) + Math.pow(tz, 2)));
+
+    if (dist2 < .1f) {
+      // Close enough.
+      message = "You did it!";
+    } else {
+      double thetaFromZ = Math.acos(-tz / dist3);
+      double thetaFromX = Math.PI / 2 - Math.acos(-tx / dist3);
+      double degreesFromX = (thetaFromX * 360 / (2 * Math.PI)) % 360;
+      double degreesFromZ = (thetaFromZ * 360 / (2 * Math.PI)) % 360;
+
+      // 0 is straight ahead
+      // 180 or -180 (e.g. degreesFromX < 0) is straight behind
+      // 90 is at 3, -90 is at 9 on a clock
+
+      if (degreesFromZ < 1) {
+        message = "Go straight and";
+      } else {
+
+        String direction = "Turn left by %.0f degrees, then";
+        if (degreesFromX < 0) {
+          direction = "Turn right by %.0f degrees, then";
+        }
+
+        message = String.format(direction, degreesFromZ);
+      }
+
+    }
+
+    message += String.format(" move %.2f meters", dist2);
+    return message;
+  }
+
   // Removes z-axis rotation from the Pose.
   // Doesn't modify x or y axis rotation.
   private Pose makePortraitOrientedCameraPose(Pose cameraPose) {
+    // I want to left-multiply by a rotation matrix that is made from the negative z rotation
+    // of the camera to get a camera that's in portrait mode.
 
     float[] cameraQuat = cameraPose.getRotationQuaternion();
-    // Can we undo z axis rotation just by negating it? Seems like NO!
-    // This converts landscape or rotated camera into vertical camera coordinates,
-    // effectively making the x-z plane the horizontal plane. Then we can operate on just the
-    // x-z plane when giving instructions.
-//      Pose inverseZRotation = Pose.makeRotation(0, 0, -cameraQuat[2], cameraQuat[3]);
-//      cameraPose = cameraPose.compose(inverseZRotation);
-//      Log.d("quat", String.format("%.2f, %.2f, %.2f, %.2f", cameraQuat[0], cameraQuat[1], cameraQuat[2], cameraQuat[3]));
-
-
-
-    // https://eecs.qmul.ac.uk/~gslabaugh/publications/euler.pdf
-//      float[] cameraRot = new float[16];
-//      cameraPose.extractRotation().toMatrix(cameraRot, 0);
-//      float cr11 = cameraRot[0];
-//      float cr12 = cameraRot[1];
-//      float cr13 = cameraRot[2];
-//      float cr21 = cameraRot[4];
-//      float cr22 = cameraRot[5];
-//      float cr23 = cameraRot[6];
-//      float cr31 = cameraRot[8];
-//      float cr32 = cameraRot[9];
-//      float cr33 = cameraRot[10];
-//
-//      double psi; // x axis
-//      double theta; // y axis
-//      double phi; // z axis
-//      if (cr31 == 1 || cr31 == -1) {
-//        phi = 0;
-//        if (cr31 == -1) {
-//          theta = Math.PI / 2;
-//          psi = Math.atan2(cr12, cr13);
-//        } else {
-//          theta = Math.PI / -2;
-//          psi = Math.atan2(cr12 * -1, cr13 * -1);
-//        }
-//      } else {
-//        theta = Math.asin(cr31) * -1.0;
-//        double one_over_cos_theta = 1 / Math.cos(theta);
-//        phi = Math.atan2(cr32 * one_over_cos_theta, cr33 * one_over_cos_theta);
-//        psi = Math.atan2(cr21 * one_over_cos_theta, cr11 * one_over_cos_theta);
-//      }
-//      Log.d("angles", String.format("%.2f, %.2f, %.2f", psi, theta, phi));
 
     // https://en.wikipedia.org/wiki/Conversion_between_quaternions_and_Euler_angles
     float qx = cameraQuat[0];
@@ -822,7 +779,6 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
     double theta = -Math.PI / 2 + 2 * Math.atan2(Math.sqrt(1 + 2 * (qw * qy - qx * qz)),
             Math.sqrt(1 - 2 * (qw * qy - qx * qz))); // y
     double psi = Math.atan2(2 * (qw * qz + qx * qy), 1 - 2 * (qy * qy + qz * qz)); // z
-//      Log.d("angles2", String.format("%.2f, %.2f, %.2f", psi, theta, phi));
 
     // Create a new rotation quaternion that's based on just phi and theta, with psi = 0.
     psi = -1 * psi;
@@ -844,6 +800,21 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
     return cameraPose.compose(newRotation);
   }
 
+  private Pose getTargetPoseAtNMeters(Pose cameraPose, Pose targetPose, float meters) {
+    // now offset it by `meters` meters.
+    float x1 = targetPose.tx() - cameraPose.tx();
+    float z1 = targetPose.tz() - cameraPose.tz();
+
+    float x2 = (float) Math.sqrt(Math.pow(meters * x1, 2) / (Math.pow(z1, 2) + Math.pow(x1, 2)));
+    if (x1 < 0) {
+      // Keep the sign.
+      x2 *= -1;
+    }
+    float z2 = z1 * x2 / x1;
+
+    return Pose.makeTranslation(x2 + cameraPose.tx(), targetPose.ty(), z2 + cameraPose.tz());
+  }
+
   // Handle only one tap per frame, as taps are usually low frequency compared to frame rate.
   private void handleTap(Frame frame, Camera camera) {
     MotionEvent tap = tapHelper.poll();
@@ -855,16 +826,13 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
     // rendering system and ARCore.
 
     // Clear all the wrapped anchors, start fresh.
+    // TODO: May want to do this not just on-tap, as this will behave poorly.
+    // Or confirm before clearing or something.
+    // The exact UX is probably less important.
     while (wrappedAnchors.size() > 0) {
       wrappedAnchors.get(0).getAnchor().detach();
       wrappedAnchors.remove(0);
     }
-
-
-    // Also this, although it assumes the phone is oriented properly?
-    // Can we make translation in the world Z and not camera Z? Does this do that?
-    // Would be great if we could look out ahead of the camera instead of tapping the right
-    // place on the screen??
 
     // First create the camera's current point.
     // Extracting translation means that I lose the orientation of the camera, which is OK,
@@ -889,35 +857,10 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
 //    // bring it back down to same height as camera
     targetPose = targetPose.compose(Pose.makeTranslation(0, cameraTranslation.ty() - targetPose.ty(), 0));
 
-    // Can we find interpolation that makes it 2m away?
-//    targetPose = Pose.makeInterpolated(cameraPose, targetPose, .5f);
-    // Would be better to have a fixed distance away rather than projecting it back down
-    // but this is OK for now.
-
-//
-//    float[] cameraQuat = cameraPose.getRotationQuaternion();
-//    // Undo z axis rotation just by negating it.
-//    // This converts landscape or rotated camera into vertical camera coordinates,
-//    // effectively making the x-z plane the horizontal plane.
-//    Pose inverseZRotation = Pose.makeRotation(0, 0, -cameraQuat[2], cameraQuat[3]);
-//    cameraPose = cameraPose.compose(inverseZRotation);
-//
-//////    // Undo x axis rotation (tilt up/down) by negating it. This makes the camera
-//////    // straight ahead.
-//////    cameraQuat = cameraPose.getRotationQuaternion();
-//////    Pose inverseXRotation = Pose.makeRotation(-cameraQuat[0], 0, 0, cameraQuat[3]);
-//////    cameraPose = cameraPose.compose(inverseXRotation);
-////
-//    wrappedAnchors.add(new WrappedAnchor(session.createAnchor(cameraPose), null));
-//
-//    // Translate 2m in front of the rotated camera frame.
-//    Pose targetPose = cameraPose.compose(Pose.makeTranslation(0, 0, -2.0f)).extractTranslation();
-//    targetPose = targetPose.compose(Pose.makeTranslation(0, cameraPose.ty() - targetPose.ty(), 0));
+    // Make sure it's two feet ahead.
+    targetPose = getTargetPoseAtNMeters(cameraPose, targetPose, TARGET_DISTANCE_ALONG_RAY);
 
     wrappedAnchors.add(new WrappedAnchor(session.createAnchor(targetPose), null));
-
-    // I don't need the trackable if I don't use instant placement!!
-    // Then I can just set these two anchors and see what happens.
 
     boolean runHitTest = false;
     if (!runHitTest) {
