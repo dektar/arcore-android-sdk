@@ -180,6 +180,8 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
   private final float[] worldLightDirection = {0.0f, 0.0f, 0.0f, 0.0f};
   private final float[] viewLightDirection = new float[4]; // view x world light direction
 
+  private long lastAnchorUpdateTimestamp = 0;
+
   @Override
   protected void onCreate(Bundle savedInstanceState) {
     super.onCreate(savedInstanceState);
@@ -633,6 +635,8 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
   private String getMessageForCurrentCameraPose(Camera camera) {
     // TODO: Could we use the depth image to set the target point as far away as possible?
 
+    // Don't run this at each frame, it's too much compute.
+    // Run it only every 20 ms or so.
     String message = "";
 
     // Get diff between current camera pose and target ray / point, and instruct the user
@@ -643,7 +647,6 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
 
     // Undo any z-axis rotation. We still have y rotation (left/right) and x rotation (up/down).
     cameraPose = makePortraitOrientedCameraPose(cameraPose);
-
 
     WrappedAnchor target = wrappedAnchors.get(1);
     Pose targetPose = target.getAnchor().getPose();
@@ -664,11 +667,15 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
     float[] newCameraPositionInOrigSpace = origCameraPose.inverse().transformPoint(cameraPt);
     targetPose = getTargetPoseAtNMeters(origCameraPose, targetPose, newCameraPositionInOrigSpace[2] - TARGET_DISTANCE_ALONG_RAY);
 
-    // Update the wrapped anchor. This is probably not a good performance idea and I should
-    // do it less frequently.
-    wrappedAnchors.get(1).getAnchor().detach();
-    wrappedAnchors.remove(1);
-    wrappedAnchors.add(new WrappedAnchor(session.createAnchor(targetPose), null));
+    long now = System.currentTimeMillis();
+    if (now - lastAnchorUpdateTimestamp > 200) {
+      // Update the wrapped anchor for visualization.
+      // Doing this less frequently to improve performance, hopefully.
+      wrappedAnchors.get(1).getAnchor().detach();
+      wrappedAnchors.remove(1);
+      wrappedAnchors.add(new WrappedAnchor(session.createAnchor(targetPose), null));
+      lastAnchorUpdateTimestamp = now;
+    }
 
     // This creates the world-space coordinates of the target point.
     float[] targetPt = {0, 0, 0};
@@ -678,45 +685,10 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
     // In other words, how much x, y and z from the current camera position if the current
     // is (0, 0, 0).
     float[] targetDir = cameraPose.inverse().transformPoint(targetPt);
-//      double targetDirSum = Math.sqrt(Math.pow(targetDir[0], 2) + Math.pow(targetDir[1], 2) + Math.pow(targetDir[2], 2));
-//      double[] targetDirNorm = {targetDir[0] / targetDirSum, targetDir[1] / targetDirSum, targetDir[2] / targetDirSum};
 
-//      Log.d("pts", String.format("%.2f, %.2f, %.2f; %.2f, %.2f, %.2f; \t %.2f, %.2f, %.2f",
-//              cameraPt[0], cameraPt[1], cameraPt[2], targetPt[0], targetPt[1], targetPt[2],
-//              targetDir[0], targetDir[1], targetDir[2]));
-
-
-    // Ignore the rotation offset, we only care about getting to the right point, not
-    // getting the orientation at that point.
-//      Pose localTranslation = offsetPose.extractTranslation();
-
-    // Convert back into local camera coordinates.
-//      Pose localTranslation = offsetTranslation.inverse().compose(cameraPose);
-
-    // Now the quat shows rotation left/right in y, tilt left/right in z, and tilt forward/back in x.
-    // we only care about rotation left/right in y, this is looking left/right.
-    // Now the translation shows how far to go in x, y and z until we reach the point.
-    // We only care about x and z, y (the height) isn't important for walking straight.
-
-
-//      // Project the camera down onto the xz plane. Then we can ignore y.
-//      Pose xzCameraPose = cameraPose.extractTranslation().compose(Pose.makeTranslation(0, -cameraPose.ty(), 0)).compose(cameraPose.extractRotation().inverse());
-//      Pose xzTargetPose = targetPose.compose(Pose.makeTranslation(0, -targetPose.ty(), 0));
-
-//      // Calculate the target's pose in camera coordinates.
-//      // This gives 2D rotation and translation.
-//      Pose offsetPose = xzCameraPose.inverse().compose(xzTargetPose);
-//
-//      float q_y = offsetPose.qy();
-//      float z = offsetPose.tz(); // how much straight to go once oriented correctly
-//      float x = offsetPose.tx(); // how much left to go (may be negative)
-//
-//      float dist = (float) (Math.sqrt(x * x + z * z));
-//
-
-    float xdist1 = targetPt[0] - cameraPt[0];
-    float zdist1 = targetPt[2] - cameraPt[2];
-    float dist1 = (float) (Math.sqrt(xdist1 * xdist1 + zdist1 * zdist1));
+//    float xdist1 = targetPt[0] - cameraPt[0];
+//    float zdist1 = targetPt[2] - cameraPt[2];
+//    float dist1 = (float) (Math.sqrt(xdist1 * xdist1 + zdist1 * zdist1));
 
     // Dist calculation: get the distance between the translation of the two poses.
     float xdist = targetPose.tx() - cameraPose.tx();
