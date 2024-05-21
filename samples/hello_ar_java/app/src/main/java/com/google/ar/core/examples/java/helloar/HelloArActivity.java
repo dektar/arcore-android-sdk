@@ -18,7 +18,11 @@ package com.google.ar.core.examples.java.helloar;
 
 import android.content.DialogInterface;
 import android.content.res.Resources;
+import android.media.AudioFormat;
+import android.media.AudioManager;
+import android.media.AudioTrack;
 import android.media.Image;
+import android.media.Spatializer;
 import android.opengl.GLES30;
 import android.opengl.GLSurfaceView;
 import android.opengl.Matrix;
@@ -77,6 +81,14 @@ import com.google.ar.core.exceptions.UnavailableArcoreNotInstalledException;
 import com.google.ar.core.exceptions.UnavailableDeviceNotCompatibleException;
 import com.google.ar.core.exceptions.UnavailableSdkTooOldException;
 import com.google.ar.core.exceptions.UnavailableUserDeclinedInstallationException;
+import com.jsyn.JSyn;
+import com.jsyn.Synthesizer;
+import com.jsyn.devices.android.AndroidAudioForJSyn;
+import com.jsyn.ports.UnitInputPort;
+import com.jsyn.unitgen.LineOut;
+import com.jsyn.unitgen.LinearRamp;
+import com.jsyn.unitgen.SineOscillator;
+
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.ByteBuffer;
@@ -181,6 +193,20 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
   private final float[] viewLightDirection = new float[4]; // view x world light direction
 
   private long lastAnchorUpdateTimestamp = 0;
+
+  // TODO: Put audio in its own class.
+  private Synthesizer synth;
+  private AndroidAudioForJSyn audioManager;
+  private LineOut lineOut;
+
+  private LinearRamp mAmpJack;
+  private SineOscillator mOsc1;
+  private SineOscillator mOsc2;
+  private static final int SAMPLE_RATE = 44100;
+
+  protected static final double FREQ_MIN = 220.;
+  protected static final double FREQ_MAX = 783.991;
+  protected static final double AMP_VALUE = 1.0; // default value for amplitude
 
   @Override
   protected void onCreate(Bundle savedInstanceState) {
@@ -702,14 +728,16 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
     float tz = targetDir[2];
     float dist3 = (float) (Math.sqrt(Math.pow(tx, 2) + Math.pow(tz, 2)));
 
+    double degreesFromZ = 0;
+    double degreesFromX = 0;
     if (dist2 < .1f) {
       // Close enough.
       message = "You did it!";
     } else {
       double thetaFromZ = Math.acos(-tz / dist3);
       double thetaFromX = Math.PI / 2 - Math.acos(-tx / dist3);
-      double degreesFromX = (thetaFromX * 360 / (2 * Math.PI)) % 360;
-      double degreesFromZ = (thetaFromZ * 360 / (2 * Math.PI)) % 360;
+      degreesFromX = (thetaFromX * 360 / (2 * Math.PI)) % 360;
+      degreesFromZ = (thetaFromZ * 360 / (2 * Math.PI)) % 360;
 
       // 0 is straight ahead
       // 180 or -180 (e.g. degreesFromX < 0) is straight behind
@@ -726,8 +754,58 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
 
         message = String.format(direction, degreesFromZ);
       }
-
     }
+
+//    if (audioTrack == null) {
+//      int sampleRate = 16000;
+//      audioTrack = new AudioTrack(AudioManager.STREAM_MUSIC,
+//              sampleRate, AudioFormat.CHANNEL_CONFIGURATION_STEREO, // CHANNEL_OUT_STEREO?
+//              AudioFormat.ENCODING_PCM_16BIT,
+//              buffer.length, AudioTrack.MODE_STREAM);
+//    }
+    if (synth == null) {
+      audioManager = new AndroidAudioForJSyn();
+      synth = JSyn.createSynthesizer(audioManager);
+//      synth.add(mAmpJack = new LinearRamp());
+      synth.add(mOsc1 = new SineOscillator());
+      synth.add(mOsc2 = new SineOscillator());
+      synth.add(lineOut = new LineOut());
+
+//      // Split level setting to both oscillators.
+//      mAmpJack.output.connect(mOsc1.amplitude);
+//      mAmpJack.output.connect(mOsc2.amplitude);
+//      mAmpJack.time.set(0.1); // duration of ramp
+
+      // Connect an oscillator to each channel of the LineOut.
+      mOsc1.output.connect(0, lineOut.input, 0);
+      mOsc2.output.connect(0, lineOut.input, 1);
+
+      mOsc1.frequency.setName("osc1 frequency");
+      mOsc1.frequency.setup(100.0, 300.0, 1000.0);
+      mOsc2.frequency.setName("osc2 frequency");
+      mOsc2.frequency.setup(100.0, 300.0, 1000.0);
+      mOsc1.amplitude.setup(0, 1, 1);
+      mOsc2.amplitude.setup(0, 1, 1);
+
+      synth.start(
+              SAMPLE_RATE,
+              audioManager.getDefaultInputDeviceID(),
+              0,
+              audioManager.getDefaultOutputDeviceID(),
+              2);
+      lineOut.start();
+      mOsc1.start();
+      mOsc2.start();
+    }
+    double freq = degreesFromZ / 360 * (FREQ_MAX - FREQ_MIN) + FREQ_MIN;
+    Log.d("freq", "" + freq);
+    mOsc1.frequency.set(freq, synth.createTimeStamp());
+//    mOsc1.amplitude.set(1.0, synth.createTimeStamp());
+//    mOsc1.start();
+    mOsc2.frequency.set(freq, synth.createTimeStamp());
+//    mOsc2.amplitude.set(1.0, synth.createTimeStamp());
+//    mOsc2.start();
+//    mAmpJack.start();
 
     message += String.format(" move %.2f meters", dist2);
     return message;

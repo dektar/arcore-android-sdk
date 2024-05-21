@@ -39,6 +39,10 @@ android {
     }
 }
 
+repositories {
+    maven { url  "https://jitpack.io" }
+}
+
 dependencies {
     // ARCore (Google Play Services for AR) library.
     implementation 'com.google.ar:core:1.42.0'
@@ -49,4 +53,6 @@ dependencies {
 
     implementation 'androidx.appcompat:appcompat:1.1.0'
     implementation 'com.google.android.material:material:1.1.0'
+    implementation "com.github.philburk:jsyn:latest.release"
 }
+
