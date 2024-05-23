@@ -672,7 +672,7 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
     Pose cameraPose = camera.getDisplayOrientedPose();
 
     // Undo any z-axis rotation. We still have y rotation (left/right) and x rotation (up/down).
-    cameraPose = makePortraitOrientedCameraPose(cameraPose);
+//    cameraPose = makePortraitOrientedCameraPose(cameraPose);
 
     WrappedAnchor target = wrappedAnchors.get(1);
     Pose targetPose = target.getAnchor().getPose();
@@ -680,7 +680,7 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
     // First update the target pose to be on the ray between camera and target pose,
     // but 2 meters ahead of the camera pose at the closest point between the camera and
     // the target.
-    // TODO: If the depth changes can we move the target point further along the same ray?
+    // If the depth changes can we move the target point further along the same ray?
 
     float[] cameraPt = {0, 0, 0};
     cameraPt = cameraPose.transformPoint(cameraPt);
@@ -694,9 +694,10 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
     targetPose = getTargetPoseAtNMeters(origCameraPose, targetPose, newCameraPositionInOrigSpace[2] - TARGET_DISTANCE_ALONG_RAY);
 
     long now = System.currentTimeMillis();
-    if (now - lastAnchorUpdateTimestamp > 200) {
+    if (now - lastAnchorUpdateTimestamp > 500) {
       // Update the wrapped anchor for visualization.
       // Doing this less frequently to improve performance, hopefully.
+      // Note that this doesn't impact the target position, just how it is rendered.
       wrappedAnchors.get(1).getAnchor().detach();
       wrappedAnchors.remove(1);
       wrappedAnchors.add(new WrappedAnchor(session.createAnchor(targetPose), null));
@@ -736,8 +737,8 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
     } else {
       double thetaFromZ = Math.acos(-tz / dist3);
       double thetaFromX = Math.PI / 2 - Math.acos(-tx / dist3);
-      degreesFromX = (thetaFromX * 360 / (2 * Math.PI)) % 360;
       degreesFromZ = (thetaFromZ * 360 / (2 * Math.PI)) % 360;
+      degreesFromX = (thetaFromX * 360 / (2 * Math.PI)) % 360;
 
       // 0 is straight ahead
       // 180 or -180 (e.g. degreesFromX < 0) is straight behind
@@ -746,23 +747,16 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
       if (degreesFromZ < 1) {
         message = "Go straight and";
       } else {
-
-        String direction = "Turn left by %.0f degrees, then";
-        if (degreesFromX < 0) {
-          direction = "Turn right by %.0f degrees, then";
+        String direction = "Turn left by %.0f degrees, then %.0f";
+        if (tx > 0) {
+          direction = "Turn right by %.0f degrees, then %.0f";
         }
 
-        message = String.format(direction, degreesFromZ);
+        message = String.format(direction, degreesFromZ, degreesFromX);
       }
     }
 
-//    if (audioTrack == null) {
-//      int sampleRate = 16000;
-//      audioTrack = new AudioTrack(AudioManager.STREAM_MUSIC,
-//              sampleRate, AudioFormat.CHANNEL_CONFIGURATION_STEREO, // CHANNEL_OUT_STEREO?
-//              AudioFormat.ENCODING_PCM_16BIT,
-//              buffer.length, AudioTrack.MODE_STREAM);
-//    }
+    double freq = degreesFromZ / 360 * (FREQ_MAX - FREQ_MIN) + FREQ_MIN;
     if (synth == null) {
       audioManager = new AndroidAudioForJSyn();
       synth = JSyn.createSynthesizer(audioManager);
@@ -771,19 +765,14 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
       synth.add(mOsc2 = new SineOscillator());
       synth.add(lineOut = new LineOut());
 
-//      // Split level setting to both oscillators.
-//      mAmpJack.output.connect(mOsc1.amplitude);
-//      mAmpJack.output.connect(mOsc2.amplitude);
-//      mAmpJack.time.set(0.1); // duration of ramp
-
       // Connect an oscillator to each channel of the LineOut.
       mOsc1.output.connect(0, lineOut.input, 0);
       mOsc2.output.connect(0, lineOut.input, 1);
 
       mOsc1.frequency.setName("osc1 frequency");
-      mOsc1.frequency.setup(100.0, 300.0, 1000.0);
+      mOsc1.frequency.setup(100.0, freq, 1000.0);
       mOsc2.frequency.setName("osc2 frequency");
-      mOsc2.frequency.setup(100.0, 300.0, 1000.0);
+      mOsc2.frequency.setup(100.0, freq, 1000.0);
       mOsc1.amplitude.setup(0, 1, 1);
       mOsc2.amplitude.setup(0, 1, 1);
 
@@ -797,15 +786,25 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
       mOsc1.start();
       mOsc2.start();
     }
-    double freq = degreesFromZ / 360 * (FREQ_MAX - FREQ_MIN) + FREQ_MIN;
-    Log.d("freq", "" + freq);
+    // Set amplitude depending on L/R. It should be quieter on the further side.
+    // Amplitude should be at 50% when it's fully in front of the phone or behind.
+
+    // If it's on the left: left amplitude varies between 50 and 100%,
+    // and right amplitude varies between 50 and 0%.
+    double leftAmplitude = (Math.abs(90 - degreesFromZ) / 90) / 2;
+    if (tx > 0) {
+      // It's on the right.
+      leftAmplitude = 1 - leftAmplitude;
+    }
+    Log.d("leftAmp", String.format("%.2f", leftAmplitude));
+    // TODO: Stop on pause or activity end.
+    // TODO: Try ramping up/down the amplitude to avoid cracks.
+    // TODO: Different tone or slow beeping when on-target?
+    // TODO: Scale total amplitude (or beep frequency) by how far away you are from the target ray.
     mOsc1.frequency.set(freq, synth.createTimeStamp());
-//    mOsc1.amplitude.set(1.0, synth.createTimeStamp());
-//    mOsc1.start();
+    mOsc1.amplitude.set(1 - leftAmplitude, synth.createTimeStamp());
     mOsc2.frequency.set(freq, synth.createTimeStamp());
-//    mOsc2.amplitude.set(1.0, synth.createTimeStamp());
-//    mOsc2.start();
-//    mAmpJack.start();
+    mOsc2.amplitude.set(leftAmplitude, synth.createTimeStamp());
 
     message += String.format(" move %.2f meters", dist2);
     return message;
