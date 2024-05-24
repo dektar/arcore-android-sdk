@@ -18,6 +18,10 @@ package com.google.ar.core.examples.java.helloar;
 
 import android.content.DialogInterface;
 import android.content.res.Resources;
+import android.hardware.Sensor;
+import android.hardware.SensorEvent;
+import android.hardware.SensorEventListener;
+import android.hardware.SensorManager;
 import android.media.AudioFormat;
 import android.media.AudioManager;
 import android.media.AudioTrack;
@@ -194,6 +198,8 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
 
   private long lastAnchorUpdateTimestamp = 0;
 
+  private OrientationListener sensorEventListener = null;
+
   // TODO: Put audio in its own class.
   private Synthesizer synth;
   private AndroidAudioForJSyn audioManager;
@@ -218,6 +224,7 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
     // Set up touch listener.
     tapHelper = new TapHelper(/* context= */ this);
     surfaceView.setOnTouchListener(tapHelper);
+    sensorEventListener = new OrientationListener();
 
     // Set up renderer.
     render = new SampleRender(surfaceView, this, getAssets());
@@ -268,6 +275,10 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
   @Override
   protected void onResume() {
     super.onResume();
+
+    SensorManager sensorManager = (SensorManager)getSystemService(SENSOR_SERVICE);
+    sensorManager.registerListener(sensorEventListener, sensorManager.getDefaultSensor(Sensor.TYPE_ORIENTATION),
+            SensorManager.SENSOR_DELAY_UI);
 
     if (session == null) {
       Exception exception = null;
@@ -344,6 +355,7 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
   @Override
   public void onPause() {
     super.onPause();
+    ((SensorManager)getSystemService(SENSOR_SERVICE)).unregisterListener(sensorEventListener);
     if (session != null) {
       // Note that the order matters - GLSurfaceView is paused first so that it does not try
       // to query the session. If Session is paused before GLSurfaceView, GLSurfaceView may
@@ -672,7 +684,7 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
     Pose cameraPose = camera.getDisplayOrientedPose();
 
     // Undo any z-axis rotation. We still have y rotation (left/right) and x rotation (up/down).
-//    cameraPose = makePortraitOrientedCameraPose(cameraPose);
+    cameraPose = makePortraitOrientedCameraPose(cameraPose);
 
     WrappedAnchor target = wrappedAnchors.get(1);
     Pose targetPose = target.getAnchor().getPose();
@@ -713,14 +725,16 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
     // is (0, 0, 0).
     float[] targetDir = cameraPose.inverse().transformPoint(targetPt);
 
+    // Dist calculation: get the distance between the translation of the two poses.
+    // This doesn't take into account the phone's orientation so it's only helpful
+    // for calculating distance.
 //    float xdist1 = targetPt[0] - cameraPt[0];
 //    float zdist1 = targetPt[2] - cameraPt[2];
 //    float dist1 = (float) (Math.sqrt(xdist1 * xdist1 + zdist1 * zdist1));
-
-    // Dist calculation: get the distance between the translation of the two poses.
     float xdist = targetPose.tx() - cameraPose.tx();
     float zdist = targetPose.tz() - cameraPose.tz();
     float dist2 = (float) (Math.sqrt(xdist * xdist + zdist * zdist));
+//    Log.d("target info", String.format("%.2f, %.2f, %.2f", xdist, zdist, dist2));
 
     // Try from world-space points.
     // Only need x and z coordinates (x/z plane is the plane of interest). We'll ignore y.
@@ -728,6 +742,10 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
     float tx = targetDir[0];
     float tz = targetDir[2];
     float dist3 = (float) (Math.sqrt(Math.pow(tx, 2) + Math.pow(tz, 2)));
+
+    // tx shoots from -something to +something around the 90 degree world point. tz is steady.
+    // doesn't matter if the target is in front or behind.
+//    Log.d("target info", String.format("%.2f, %.2f, %.2f", tx, tz, dist3));
 
     double degreesFromZ = 0;
     double degreesFromX = 0;
@@ -812,6 +830,10 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
 
   // Removes z-axis rotation from the Pose.
   // Doesn't modify x or y axis rotation.
+
+  // TODO: Need to not assume the quat is normalized
+  // TODO: Avoid gimbal lock
+  // Try https://www.euclideanspace.com/maths/geometry/rotations/conversions/quaternionToEuler/
   private Pose makePortraitOrientedCameraPose(Pose cameraPose) {
     // I want to left-multiply by a rotation matrix that is made from the negative z rotation
     // of the camera to get a camera that's in portrait mode.
@@ -819,20 +841,51 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
     float[] cameraQuat = cameraPose.getRotationQuaternion();
 
     // https://en.wikipedia.org/wiki/Conversion_between_quaternions_and_Euler_angles
-    float qx = cameraQuat[0];
-    float qy = cameraQuat[1];
-    float qz = cameraQuat[2];
-    float qw = cameraQuat[3];
+    double qx = cameraQuat[0];
+    double qy = cameraQuat[1];
+    double qz = cameraQuat[2];
+    double qw = cameraQuat[3];
 
-    double phi = Math.atan2(2 * (qw * qx + qy * qz), 1 - 2 * (qx * qx + qy * qy));
-    double theta = -Math.PI / 2 + 2 * Math.atan2(Math.sqrt(1 + 2 * (qw * qy - qx * qz)),
-            Math.sqrt(1 - 2 * (qw * qy - qx * qz))); // y
-    double psi = Math.atan2(2 * (qw * qz + qx * qy), 1 - 2 * (qy * qy + qz * qz)); // z
+//    double norm = Math.sqrt(qx * qx + qy * qy + qz * qz + qw * qw);
+//    qx /= norm;
+//    qy /= norm;
+//    qz /= norm;
+//    qw /= norm;
+
+    double phi = 0;  // x
+    double theta = 0; // y
+    double psi = 0; // z
+
+    // Check for gimbal lock.
+    // One place it behaves badly is here: 0.03 -- 0.03, 0.72, -0.01, -0.69 (lock, qx, qy, qz, qw)
+    // normalized: 0.04 -- 0.04, 0.70, -0.01, -0.72
+    double lock = qx * qy + qz * qw;
+    Log.d("gimbal lock", String.format("%.2f -- %.2f, %.2f, %.2f, %.2f", lock, qx, qy, qz, qw));
+    if (lock > .499f) {
+      // TODO
+      Log.d("gimbal lock", "gimbal lock 1!!");
+    } else if (lock < -0.499f) {
+      // TODO
+      Log.d("gimbal lock", "gimbal lock 2!!");
+    } else {
+      phi = Math.atan2(2 * qy * qw - 2 * qx * qz, 1 - 2 * qy * qy - 2 * qz * qz);
+      theta = Math.asin(2 * lock);
+      psi = Math.atan2(2 * qx * qw - 2 * qy * qz, 1 - 2 * qx * qx - 2 * qy * qy);
+//      phi = Math.atan2(2 * (qw * qx + qy * qz), 1 - 2 * (qx * qx + qy * qy));
+//      theta = -Math.PI / 2 + 2 * Math.atan2(Math.sqrt(1 + 2 * (qw * qy - qx * qz)),
+//              Math.sqrt(1 - 2 * (qw * qy - qx * qz)));
+//      psi = Math.atan2(2 * (qw * qz + qx * qy), 1 - 2 * (qy * qy + qz * qz));
+    }
+
+    float zAngle = sensorEventListener.getAngle();
+    Log.d("angles", String.format("%.2f, %.2f, %.2f, %.2f, %.2f", phi, theta, psi, zAngle, lock));
 
     // Create a new rotation quaternion that's based on just phi and theta, with psi = 0.
-    psi = -1 * psi;
+    // psi is giving me the wrong thing. Just getting it from phone sensor works though.
+    psi = -1 * zAngle; // -1 * psi;
     phi = 0;
     theta = 0;
+
     double cr = Math.cos(phi * 0.5);
     double sr = Math.sin(phi * 0.5);
     double cp = Math.cos(theta * 0.5);
@@ -840,12 +893,12 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
     double cy = Math.cos(psi * 0.5);
     double sy = Math.sin(psi * 0.5);
 
-    qw = (float) (cr * cp * cy + sr * sp * sy);
-    qx = (float) (sr * cp * cy - cr * sp * sy);
-    qy = (float) (cr * sp * cy + sr * cp * sy);
-    qz = (float) (cr * cp * sy - sr * sp * cy);
+    qw = cr * cp * cy + sr * sp * sy;
+    qx = sr * cp * cy - cr * sp * sy;
+    qy = cr * sp * cy + sr * cp * sy;
+    qz = cr * cp * sy - sr * sp * cy;
 
-    Pose newRotation = Pose.makeRotation(qx, qy, qz, qw);
+    Pose newRotation = Pose.makeRotation((float) qx, (float) qy, (float) qz, (float) qw);
     return cameraPose.compose(newRotation);
   }
 
@@ -1189,5 +1242,27 @@ class WrappedAnchor {
 
   public Trackable getTrackable() {
     return trackable;
+  }
+}
+
+class OrientationListener implements SensorEventListener {
+
+  private float angle;
+  private static float mult = (float) (Math.PI / 180.);
+
+  @Override
+  public void onSensorChanged(SensorEvent event) {
+    if (event.sensor.getType() == Sensor.TYPE_ORIENTATION) {
+      angle = event.values[2];
+    }
+  }
+
+  @Override
+  public void onAccuracyChanged(Sensor sensor, int accuracy) {
+
+  }
+
+  public float getAngle() {
+    return angle * mult;
   }
 }
