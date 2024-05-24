@@ -18,15 +18,7 @@ package com.google.ar.core.examples.java.helloar;
 
 import android.content.DialogInterface;
 import android.content.res.Resources;
-import android.hardware.Sensor;
-import android.hardware.SensorEvent;
-import android.hardware.SensorEventListener;
-import android.hardware.SensorManager;
-import android.media.AudioFormat;
-import android.media.AudioManager;
-import android.media.AudioTrack;
 import android.media.Image;
-import android.media.Spatializer;
 import android.opengl.GLES30;
 import android.opengl.GLSurfaceView;
 import android.opengl.Matrix;
@@ -198,8 +190,6 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
 
   private long lastAnchorUpdateTimestamp = 0;
 
-//  private OrientationListener sensorEventListener = null;
-
   // TODO: Put audio in its own class.
   private Synthesizer synth;
   private AndroidAudioForJSyn audioManager;
@@ -224,7 +214,6 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
     // Set up touch listener.
     tapHelper = new TapHelper(/* context= */ this);
     surfaceView.setOnTouchListener(tapHelper);
-//    sensorEventListener = new OrientationListener();
 
     // Set up renderer.
     render = new SampleRender(surfaceView, this, getAssets());
@@ -275,10 +264,6 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
   @Override
   protected void onResume() {
     super.onResume();
-
-//    SensorManager sensorManager = (SensorManager)getSystemService(SENSOR_SERVICE);
-//    sensorManager.registerListener(sensorEventListener, sensorManager.getDefaultSensor(Sensor.TYPE_ORIENTATION),
-//            SensorManager.SENSOR_DELAY_UI);
 
     if (session == null) {
       Exception exception = null;
@@ -355,7 +340,6 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
   @Override
   public void onPause() {
     super.onPause();
-//    ((SensorManager)getSystemService(SENSOR_SERVICE)).unregisterListener(sensorEventListener);
     if (session != null) {
       // Note that the order matters - GLSurfaceView is paused first so that it does not try
       // to query the session. If Session is paused before GLSurfaceView, GLSurfaceView may
@@ -363,6 +347,12 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
       displayRotationHelper.onPause();
       surfaceView.onPause();
       session.pause();
+    }
+    if (synth != null) {
+      synth.stop();
+      mOsc1.stop();
+      mOsc2.stop();
+      synth = null;
     }
   }
 
@@ -567,7 +557,10 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
     // has placed any objects.
     String message = null;
     if (wrappedAnchors.size() == 2 && camera.getTrackingState() == TrackingState.TRACKING) {
-      message = getMessageForCurrentCameraPose(camera);
+      float[] offsets = getOffsetsForCurrentCameraPose(camera);
+      sonifyCurrentOffsets(offsets[0], offsets[2]);
+      message = getMessageForCurrentPoseOffsets(offsets[0], offsets[1], offsets[2]);
+      // TODO: Could we use the depth image to set the target point as far away as possible?
     }
     if (camera.getTrackingState() == TrackingState.PAUSED) {
       if (camera.getTrackingFailureReason() == TrackingFailureReason.NONE) {
@@ -670,13 +663,7 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
     backgroundRenderer.drawVirtualScene(render, virtualSceneFramebuffer, Z_NEAR, Z_FAR);
   }
 
-  private String getMessageForCurrentCameraPose(Camera camera) {
-    // TODO: Could we use the depth image to set the target point as far away as possible?
-
-    // Don't run this at each frame, it's too much compute.
-    // Run it only every 20 ms or so.
-    String message = "";
-
+  private float[] getOffsetsForCurrentCameraPose(Camera camera) {
     // Get diff between current camera pose and target ray / point, and instruct the user
     // how to go in the right direction in world coordinates.
     // First, get the current position, including camera rotation (we need to know if you are
@@ -747,38 +734,18 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
     // doesn't matter if the target is in front or behind.
 //    Log.d("target info", String.format("%.2f, %.2f, %.2f", tx, tz, dist3));
 
-    double degreesFromZ = 0;
-    double degreesFromX = 0;
-    if (dist2 < .1f) {
-      // Close enough.
-      message = "You did it!";
-    } else {
-      double thetaFromZ = Math.acos(-tz / dist3);
-      double thetaFromX = Math.PI / 2 - Math.acos(-tx / dist3);
-      degreesFromZ = (thetaFromZ * 360 / (2 * Math.PI)) % 360;
-      degreesFromX = (thetaFromX * 360 / (2 * Math.PI)) % 360;
+    double thetaFromZ = Math.acos(-tz / dist3);
+    double degreesFromZ = (thetaFromZ * 360 / (2 * Math.PI)) % 360;
 
-      // 0 is straight ahead
-      // 180 or -180 (e.g. degreesFromX < 0) is straight behind
-      // 90 is at 3, -90 is at 9 on a clock
+    float[] result = {(float)degreesFromZ, dist2, tx};
+    return result;
+  }
 
-      if (degreesFromZ < 1) {
-        message = "Go straight and";
-      } else {
-        String direction = "Turn left by %.0f degrees, then %.0f";
-        if (tx > 0) {
-          direction = "Turn right by %.0f degrees, then %.0f";
-        }
-
-        message = String.format(direction, degreesFromZ, degreesFromX);
-      }
-    }
-
-    double freq = degreesFromZ / 360 * (FREQ_MAX - FREQ_MIN) + FREQ_MIN;
+  private void sonifyCurrentOffsets(float theta, float tx) {
+    double freq = theta / 360 * (FREQ_MAX - FREQ_MIN) + FREQ_MIN;
     if (synth == null) {
       audioManager = new AndroidAudioForJSyn();
       synth = JSyn.createSynthesizer(audioManager);
-//      synth.add(mAmpJack = new LinearRamp());
       synth.add(mOsc1 = new SineOscillator());
       synth.add(mOsc2 = new SineOscillator());
       synth.add(lineOut = new LineOut());
@@ -794,6 +761,7 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
       mOsc1.amplitude.setup(0, 1, 1);
       mOsc2.amplitude.setup(0, 1, 1);
 
+      // Stereo audio.
       synth.start(
               SAMPLE_RATE,
               audioManager.getDefaultInputDeviceID(),
@@ -809,31 +777,50 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
 
     // If it's on the left: left amplitude varies between 50 and 100%,
     // and right amplitude varies between 50 and 0%.
-    double leftAmplitude = (Math.abs(90 - degreesFromZ) / 90) / 2;
+    double leftAmplitude = (Math.abs(90 - theta) / 90) / 2;
     if (tx > 0) {
-      // It's on the right.
+      // It's on the right. Same but opposite.
       leftAmplitude = 1 - leftAmplitude;
     }
-    Log.d("leftAmp", String.format("%.2f", leftAmplitude));
-    // TODO: Stop on pause or activity end.
+//    Log.d("leftAmp", String.format("%.2f", leftAmplitude));
     // TODO: Try ramping up/down the amplitude to avoid cracks.
+    // May be able to use a LinearRamp.
     // TODO: Different tone or slow beeping when on-target?
     // TODO: Scale total amplitude (or beep frequency) by how far away you are from the target ray.
     mOsc1.frequency.set(freq, synth.createTimeStamp());
     mOsc1.amplitude.set(1 - leftAmplitude, synth.createTimeStamp());
     mOsc2.frequency.set(freq, synth.createTimeStamp());
     mOsc2.amplitude.set(leftAmplitude, synth.createTimeStamp());
+  }
 
-    message += String.format(" move %.2f meters", dist2);
+  private String getMessageForCurrentPoseOffsets(float theta, float dist, float tx) {
+
+    // Don't run this at each frame, it's too much compute.
+    // Run it only every 20 ms or so.
+    String message = "";
+
+    // 0 is straight ahead
+    // 180 or -180 (e.g. degreesFromX < 0) is straight behind
+    // 90 is at 3, -90 is at 9 on a clock
+
+    if (theta < 1) {
+      message = "Go straight and";
+    } else {
+      String direction = "Turn left by %.0f degrees, then ";
+      if (tx > 0) {
+        direction = "Turn right by %.0f degrees, then ";
+      }
+
+      message = String.format(direction, theta);
+    }
+
+    message += String.format(" move %.2f meters", dist);
     return message;
   }
 
   // Removes z-axis rotation from the Pose.
   // Doesn't modify x or y axis rotation.
-
-  // TODO: Need to not assume the quat is normalized
-  // TODO: Avoid gimbal lock
-  // Try https://www.euclideanspace.com/maths/geometry/rotations/conversions/quaternionToEuler/
+  // This is equivalent to rotating the phone into portrait orientation.
   private Pose makePortraitOrientedCameraPose(Pose cameraPose) {
     // I want to left-multiply by a rotation matrix that is made from the negative z rotation
     // of the camera to get a camera that's in portrait mode.
@@ -846,6 +833,7 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
     double qz = cameraQuat[2];
     double qw = cameraQuat[3];
 
+    // It seems to be normalized so I can skip this step.
 //    double norm = Math.sqrt(qx * qx + qy * qy + qz * qz + qw * qw);
 //    qx /= norm;
 //    qy /= norm;
@@ -857,15 +845,13 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
     double theta = 0; // z
 
     // Check for gimbal lock.
-    // One place it behaves badly is here: 0.03 -- 0.03, 0.72, -0.01, -0.69 (lock, qx, qy, qz, qw)
-    // normalized: 0.04 -- 0.04, 0.70, -0.01, -0.72
+    // https://www.euclideanspace.com/maths/geometry/rotations/conversions/quaternionToEuler/
     double lock = qx * qy + qz * qw;
-    Log.d("gimbal lock", String.format("%.2f -- %.2f, %.2f, %.2f, %.2f", lock, qx, qy, qz, qw));
     if (lock > .499f) {
-      // TODO
+      // TODO: Should I do something here?
       Log.d("gimbal lock", "gimbal lock 1!!");
     } else if (lock < -0.499f) {
-      // TODO
+      // TODO: Should I do something here?
       Log.d("gimbal lock", "gimbal lock 2!!");
     } else {
       phi = Math.atan2(2 * qy * qw - 2 * qx * qz, 1 - 2 * qy * qy - 2 * qz * qz);
@@ -877,11 +863,9 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
 //      psi = Math.atan2(2 * (qw * qz + qx * qy), 1 - 2 * (qy * qy + qz * qz));
     }
 
-//    float zAngle = sensorEventListener.getAngle();
-//    Log.d("angles", String.format("%.2f, %.2f, %.2f, %.2f, %.2f", phi, theta, psi, zAngle, lock));
-
-    // Create a new rotation quaternion that's based on just phi and psi, with theta = 0.
-    // Do this by composing with a quat that inverts theta and doesn't impact phi and psi.
+    // Replace the camera rotation with a new rotation quaternion that's based on just phi and psi,
+    // with theta = 0.
+    // Do this by composing with a quaternion that inverts theta and doesn't impact phi and psi.
 
     psi = 0;
     phi = 0;
@@ -1245,25 +1229,3 @@ class WrappedAnchor {
     return trackable;
   }
 }
-
-//class OrientationListener implements SensorEventListener {
-//
-//  private float angle;
-//  private static float mult = (float) (Math.PI / 180.);
-//
-//  @Override
-//  public void onSensorChanged(SensorEvent event) {
-//    if (event.sensor.getType() == Sensor.TYPE_ORIENTATION) {
-//      angle = event.values[2];
-//    }
-//  }
-//
-//  @Override
-//  public void onAccuracyChanged(Sensor sensor, int accuracy) {
-//
-//  }
-//
-//  public float getAngle() {
-//    return angle * mult;
-//  }
-//}
