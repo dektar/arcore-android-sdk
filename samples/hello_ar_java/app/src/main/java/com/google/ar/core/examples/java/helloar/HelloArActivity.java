@@ -198,7 +198,7 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
 
   private long lastAnchorUpdateTimestamp = 0;
 
-  private OrientationListener sensorEventListener = null;
+//  private OrientationListener sensorEventListener = null;
 
   // TODO: Put audio in its own class.
   private Synthesizer synth;
@@ -224,7 +224,7 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
     // Set up touch listener.
     tapHelper = new TapHelper(/* context= */ this);
     surfaceView.setOnTouchListener(tapHelper);
-    sensorEventListener = new OrientationListener();
+//    sensorEventListener = new OrientationListener();
 
     // Set up renderer.
     render = new SampleRender(surfaceView, this, getAssets());
@@ -276,9 +276,9 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
   protected void onResume() {
     super.onResume();
 
-    SensorManager sensorManager = (SensorManager)getSystemService(SENSOR_SERVICE);
-    sensorManager.registerListener(sensorEventListener, sensorManager.getDefaultSensor(Sensor.TYPE_ORIENTATION),
-            SensorManager.SENSOR_DELAY_UI);
+//    SensorManager sensorManager = (SensorManager)getSystemService(SENSOR_SERVICE);
+//    sensorManager.registerListener(sensorEventListener, sensorManager.getDefaultSensor(Sensor.TYPE_ORIENTATION),
+//            SensorManager.SENSOR_DELAY_UI);
 
     if (session == null) {
       Exception exception = null;
@@ -355,7 +355,7 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
   @Override
   public void onPause() {
     super.onPause();
-    ((SensorManager)getSystemService(SENSOR_SERVICE)).unregisterListener(sensorEventListener);
+//    ((SensorManager)getSystemService(SENSOR_SERVICE)).unregisterListener(sensorEventListener);
     if (session != null) {
       // Note that the order matters - GLSurfaceView is paused first so that it does not try
       // to query the session. If Session is paused before GLSurfaceView, GLSurfaceView may
@@ -853,8 +853,8 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
 //    qw /= norm;
 
     double phi = 0;  // x
-    double theta = 0; // y
-    double psi = 0; // z
+    double psi = 0; // y
+    double theta = 0; // z
 
     // Check for gimbal lock.
     // One place it behaves badly is here: 0.03 -- 0.03, 0.72, -0.01, -0.69 (lock, qx, qy, qz, qw)
@@ -877,21 +877,22 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
 //      psi = Math.atan2(2 * (qw * qz + qx * qy), 1 - 2 * (qy * qy + qz * qz));
     }
 
-    float zAngle = sensorEventListener.getAngle();
-    Log.d("angles", String.format("%.2f, %.2f, %.2f, %.2f, %.2f", phi, theta, psi, zAngle, lock));
+//    float zAngle = sensorEventListener.getAngle();
+//    Log.d("angles", String.format("%.2f, %.2f, %.2f, %.2f, %.2f", phi, theta, psi, zAngle, lock));
 
-    // Create a new rotation quaternion that's based on just phi and theta, with psi = 0.
-    // psi is giving me the wrong thing. Just getting it from phone sensor works though.
-    psi = -1 * zAngle; // -1 * psi;
+    // Create a new rotation quaternion that's based on just phi and psi, with theta = 0.
+    // Do this by composing with a quat that inverts theta and doesn't impact phi and psi.
+
+    psi = 0;
     phi = 0;
-    theta = 0;
+    theta = -1 * theta;
 
     double cr = Math.cos(phi * 0.5);
     double sr = Math.sin(phi * 0.5);
-    double cp = Math.cos(theta * 0.5);
-    double sp = Math.sin(theta * 0.5);
-    double cy = Math.cos(psi * 0.5);
-    double sy = Math.sin(psi * 0.5);
+    double cp = Math.cos(psi * 0.5);
+    double sp = Math.sin(psi * 0.5);
+    double cy = Math.cos(theta * 0.5);
+    double sy = Math.sin(theta * 0.5);
 
     qw = cr * cp * cy + sr * sp * sy;
     qx = sr * cp * cy - cr * sp * sy;
@@ -1245,24 +1246,24 @@ class WrappedAnchor {
   }
 }
 
-class OrientationListener implements SensorEventListener {
-
-  private float angle;
-  private static float mult = (float) (Math.PI / 180.);
-
-  @Override
-  public void onSensorChanged(SensorEvent event) {
-    if (event.sensor.getType() == Sensor.TYPE_ORIENTATION) {
-      angle = event.values[2];
-    }
-  }
-
-  @Override
-  public void onAccuracyChanged(Sensor sensor, int accuracy) {
-
-  }
-
-  public float getAngle() {
-    return angle * mult;
-  }
-}
+//class OrientationListener implements SensorEventListener {
+//
+//  private float angle;
+//  private static float mult = (float) (Math.PI / 180.);
+//
+//  @Override
+//  public void onSensorChanged(SensorEvent event) {
+//    if (event.sensor.getType() == Sensor.TYPE_ORIENTATION) {
+//      angle = event.values[2];
+//    }
+//  }
+//
+//  @Override
+//  public void onAccuracyChanged(Sensor sensor, int accuracy) {
+//
+//  }
+//
+//  public float getAngle() {
+//    return angle * mult;
+//  }
+//}
