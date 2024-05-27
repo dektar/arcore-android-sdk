@@ -57,6 +57,7 @@ import com.google.ar.core.examples.java.common.helpers.DepthSettings;
 import com.google.ar.core.examples.java.common.helpers.DisplayRotationHelper;
 import com.google.ar.core.examples.java.common.helpers.FullScreenHelper;
 import com.google.ar.core.examples.java.common.helpers.InstantPlacementSettings;
+import com.google.ar.core.examples.java.common.helpers.SineEnvelope;
 import com.google.ar.core.examples.java.common.helpers.SnackbarHelper;
 import com.google.ar.core.examples.java.common.helpers.TapHelper;
 import com.google.ar.core.examples.java.common.helpers.TrackingStateHelper;
@@ -80,10 +81,9 @@ import com.google.ar.core.exceptions.UnavailableUserDeclinedInstallationExceptio
 import com.jsyn.JSyn;
 import com.jsyn.Synthesizer;
 import com.jsyn.devices.android.AndroidAudioForJSyn;
-import com.jsyn.ports.UnitInputPort;
+import com.jsyn.unitgen.EnvelopeDAHDSR;
 import com.jsyn.unitgen.LineOut;
-import com.jsyn.unitgen.LinearRamp;
-import com.jsyn.unitgen.SineOscillator;
+import com.softsynth.math.AudioMath;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -190,19 +190,18 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
 
   private long lastAnchorUpdateTimestamp = 0;
 
+  private float STRAIGHT_ENOUGH_THETA = 1.5f;
+
   // TODO: Put audio in its own class.
   private Synthesizer synth;
   private AndroidAudioForJSyn audioManager;
   private LineOut lineOut;
-
-  private LinearRamp mAmpJack;
-  private SineOscillator mOsc1;
-  private SineOscillator mOsc2;
+  private SineEnvelope voiceL;
+  private SineEnvelope voiceR;
+  private boolean mIsSonifying = false;
   private static final int SAMPLE_RATE = 44100;
-
   protected static final double FREQ_MIN = 220.;
   protected static final double FREQ_MAX = 783.991;
-  protected static final double AMP_VALUE = 1.0; // default value for amplitude
 
   @Override
   protected void onCreate(Bundle savedInstanceState) {
@@ -350,9 +349,11 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
     }
     if (synth != null) {
       synth.stop();
-      mOsc1.stop();
-      mOsc2.stop();
       synth = null;
+    }
+    if (lineOut != null) {
+      lineOut.stop();
+      lineOut = null;
     }
   }
 
@@ -556,9 +557,9 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
     // Show a message based on whether tracking has failed, if planes are detected, and if the user
     // has placed any objects.
     String message = null;
+    float[] offsets = {0, 0, 0};
     if (wrappedAnchors.size() == 2 && camera.getTrackingState() == TrackingState.TRACKING) {
-      float[] offsets = getOffsetsForCurrentCameraPose(camera);
-      sonifyCurrentOffsets(offsets[0], offsets[2]);
+      offsets = getOffsetsForCurrentCameraPose(camera);
       message = getMessageForCurrentPoseOffsets(offsets[0], offsets[1], offsets[2]);
       // TODO: Could we use the depth image to set the target point as far away as possible?
     }
@@ -568,10 +569,12 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
       } else {
         message = TrackingStateHelper.getTrackingFailureReasonString(camera);
       }
+      pauseSonification();
     } else if (hasTrackingPlane()) {
       if (wrappedAnchors.isEmpty()) {
         message = WAITING_FOR_TAP_MESSAGE;
       }
+      sonifyCurrentOffsets(offsets[0], offsets[2]);
     } else {
       message = SEARCHING_PLANE_MESSAGE;
     }
@@ -742,24 +745,29 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
   }
 
   private void sonifyCurrentOffsets(float theta, float tx) {
-    double freq = theta / 360 * (FREQ_MAX - FREQ_MIN) + FREQ_MIN;
     if (synth == null) {
       audioManager = new AndroidAudioForJSyn();
       synth = JSyn.createSynthesizer(audioManager);
-      synth.add(mOsc1 = new SineOscillator());
-      synth.add(mOsc2 = new SineOscillator());
+      if (voiceL == null) {
+        voiceL = new SineEnvelope();
+      }
+      if (voiceR == null) {
+        voiceR = new SineEnvelope();
+      }
+      synth.add(voiceL);
+      synth.add(voiceR);
+
+      // Helps with clicks.
+      EnvelopeDAHDSR DAHDSR = voiceL.getDAHDSR();
+      DAHDSR.hold.set(1000);
+      DAHDSR.sustain.set(1000);
+      DAHDSR = voiceR.getDAHDSR();
+      DAHDSR.hold.set(1000);
+      DAHDSR.sustain.set(1000);
+
       synth.add(lineOut = new LineOut());
-
-      // Connect an oscillator to each channel of the LineOut.
-      mOsc1.output.connect(0, lineOut.input, 0);
-      mOsc2.output.connect(0, lineOut.input, 1);
-
-      mOsc1.frequency.setName("osc1 frequency");
-      mOsc1.frequency.setup(100.0, freq, 1000.0);
-      mOsc2.frequency.setName("osc2 frequency");
-      mOsc2.frequency.setup(100.0, freq, 1000.0);
-      mOsc1.amplitude.setup(0, 1, 1);
-      mOsc2.amplitude.setup(0, 1, 1);
+      voiceR.output.connect(0, lineOut.input, 0);
+      voiceL.output.connect(0, lineOut.input, 1);
 
       // Stereo audio.
       synth.start(
@@ -768,10 +776,26 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
               0,
               audioManager.getDefaultOutputDeviceID(),
               2);
-      lineOut.start();
-      mOsc1.start();
-      mOsc2.start();
     }
+    if (!mIsSonifying) {
+      lineOut.start();
+      mIsSonifying = true;
+    }
+
+    // Raw frequency
+//    double freq1 = theta / 180 * (FREQ_MAX - FREQ_MIN) + FREQ_MIN;
+
+    // Notes are easier to distinguish.
+    // https://github.com/googlearchive/science-journal/blob/1be4c647b0f1e25259bf6b098cbf6416e9be9915/OpenScienceJournal/whistlepunk_library/src/main/java/com/google/android/apps/forscience/whistlepunk/audiogen/voices/ScaleVoice.java
+    int minPitch = (int) Math.floor(AudioMath.frequencyToPitch(FREQ_MIN)) + 2;
+    int maxPitch = (int) Math.floor(AudioMath.frequencyToPitch(FREQ_MAX));
+    double freq = AudioMath.pitchToFrequency((int) (theta / 180 * (maxPitch - minPitch) + minPitch));
+
+    if (theta < STRAIGHT_ENOUGH_THETA) {
+      // Extra low note for straight enough.
+      freq = FREQ_MIN;
+    }
+
     // Set amplitude depending on L/R. It should be quieter on the further side.
     // Amplitude should be at 50% when it's fully in front of the phone or behind.
 
@@ -782,15 +806,18 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
       // It's on the right. Same but opposite.
       leftAmplitude = 1 - leftAmplitude;
     }
-//    Log.d("leftAmp", String.format("%.2f", leftAmplitude));
-    // TODO: Try ramping up/down the amplitude to avoid cracks.
-    // May be able to use a LinearRamp.
-    // TODO: Different tone or slow beeping when on-target?
-    // TODO: Scale total amplitude (or beep frequency) by how far away you are from the target ray.
-    mOsc1.frequency.set(freq, synth.createTimeStamp());
-    mOsc1.amplitude.set(1 - leftAmplitude, synth.createTimeStamp());
-    mOsc2.frequency.set(freq, synth.createTimeStamp());
-    mOsc2.amplitude.set(leftAmplitude, synth.createTimeStamp());
+    // TODO: Consider slow beeping when on-target?
+    // TODO: Maybe scale total amplitude (or beep frequency) by how far away you are from the target ray.
+    com.softsynth.shared.time.TimeStamp timestamp = synth.createTimeStamp();
+    voiceL.noteOn(freq, leftAmplitude, timestamp);
+    voiceR.noteOn(freq, 1 - leftAmplitude, timestamp);
+  }
+
+  private void pauseSonification() {
+    if (lineOut != null) {
+      lineOut.stop();
+    }
+    mIsSonifying = false;
   }
 
   private String getMessageForCurrentPoseOffsets(float theta, float dist, float tx) {
@@ -803,18 +830,18 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
     // 180 or -180 (e.g. degreesFromX < 0) is straight behind
     // 90 is at 3, -90 is at 9 on a clock
 
-    if (theta < 1) {
-      message = "Go straight and";
+    if (theta < STRAIGHT_ENOUGH_THETA) {
+      message = "Go straight";
     } else {
-      String direction = "Turn left by %.0f degrees, then ";
+      String direction = "Turn left by %.0f degrees";
       if (tx > 0) {
-        direction = "Turn right by %.0f degrees, then ";
+        direction = "Turn right by %.0f degrees";
       }
 
       message = String.format(direction, theta);
     }
 
-    message += String.format(" move %.2f meters", dist);
+//    message += String.format(", then move %.2f meters", dist);
     return message;
   }
 
@@ -854,13 +881,9 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
       // TODO: Should I do something here?
       Log.d("gimbal lock", "gimbal lock 2!!");
     } else {
-      phi = Math.atan2(2 * qy * qw - 2 * qx * qz, 1 - 2 * qy * qy - 2 * qz * qz);
+//      phi = Math.atan2(2 * qy * qw - 2 * qx * qz, 1 - 2 * qy * qy - 2 * qz * qz);
       theta = Math.asin(2 * lock);
-      psi = Math.atan2(2 * qx * qw - 2 * qy * qz, 1 - 2 * qx * qx - 2 * qy * qy);
-//      phi = Math.atan2(2 * (qw * qx + qy * qz), 1 - 2 * (qx * qx + qy * qy));
-//      theta = -Math.PI / 2 + 2 * Math.atan2(Math.sqrt(1 + 2 * (qw * qy - qx * qz)),
-//              Math.sqrt(1 - 2 * (qw * qy - qx * qz)));
-//      psi = Math.atan2(2 * (qw * qz + qx * qy), 1 - 2 * (qy * qy + qz * qz));
+//      psi = Math.atan2(2 * qx * qw - 2 * qy * qz, 1 - 2 * qx * qx - 2 * qy * qy);
     }
 
     // Replace the camera rotation with a new rotation quaternion that's based on just phi and psi,
