@@ -18,6 +18,4 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent">
   <item android:id="@+id/depth_settings" android:title="Depth API"/>
-  <item android:id="@+id/instant_placement_settings"
-      android:title="Instant Placement"/>
 </menu>

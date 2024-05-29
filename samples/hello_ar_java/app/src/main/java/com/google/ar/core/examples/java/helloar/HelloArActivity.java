@@ -37,15 +37,10 @@ import com.google.ar.core.ArCoreApk;
 import com.google.ar.core.ArCoreApk.Availability;
 import com.google.ar.core.Camera;
 import com.google.ar.core.Config;
-import com.google.ar.core.Config.InstantPlacementMode;
-import com.google.ar.core.DepthPoint;
 import com.google.ar.core.Frame;
 import com.google.ar.core.HitResult;
-import com.google.ar.core.InstantPlacementPoint;
 import com.google.ar.core.LightEstimate;
 import com.google.ar.core.Plane;
-import com.google.ar.core.Point;
-import com.google.ar.core.Point.OrientationMode;
 import com.google.ar.core.PointCloud;
 import com.google.ar.core.Pose;
 import com.google.ar.core.Session;
@@ -56,7 +51,6 @@ import com.google.ar.core.examples.java.common.helpers.CameraPermissionHelper;
 import com.google.ar.core.examples.java.common.helpers.DepthSettings;
 import com.google.ar.core.examples.java.common.helpers.DisplayRotationHelper;
 import com.google.ar.core.examples.java.common.helpers.FullScreenHelper;
-import com.google.ar.core.examples.java.common.helpers.InstantPlacementSettings;
 import com.google.ar.core.examples.java.common.helpers.SineEnvelope;
 import com.google.ar.core.examples.java.common.helpers.SnackbarHelper;
 import com.google.ar.core.examples.java.common.helpers.TapHelper;
@@ -146,17 +140,6 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
   private final DepthSettings depthSettings = new DepthSettings();
   private boolean[] depthSettingsMenuDialogCheckboxes = new boolean[2];
 
-  private final InstantPlacementSettings instantPlacementSettings = new InstantPlacementSettings();
-  private boolean[] instantPlacementSettingsMenuDialogCheckboxes = new boolean[1];
-  // Assumed distance from the device camera to the surface on which user will try to place objects.
-  // This value affects the apparent scale of objects while the tracking method of the
-  // Instant Placement point is SCREENSPACE_WITH_APPROXIMATE_DISTANCE.
-  // Values in the [0.2, 2.0] meter range are a good choice for most AR experiences. Use lower
-  // values for AR experiences where users are expected to place objects on surfaces close to the
-  // camera. Use larger values for experiences where the user will likely be standing and trying to
-  // place an object on the ground or floor in front of them.
-  private static final float APPROXIMATE_DISTANCE_METERS = 2.0f;
-
   // Point Cloud
   private VertexBuffer pointCloudVertexBuffer;
   private Mesh pointCloudMesh;
@@ -169,7 +152,6 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
   private Mesh virtualObjectMesh;
   private Shader virtualObjectShader;
   private Texture virtualObjectAlbedoTexture;
-  private Texture virtualObjectAlbedoInstantPlacementTexture;
 
   private final List<WrappedAnchor> wrappedAnchors = new ArrayList<>();
 
@@ -189,6 +171,9 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
   private final float[] viewLightDirection = new float[4]; // view x world light direction
 
   private long lastAnchorUpdateTimestamp = 0;
+
+  private boolean mHasBeenClicked = false;
+  private View.OnClickListener mSurfaceClickListener = null;
 
   private float STRAIGHT_ENOUGH_THETA = 1.5f;
 
@@ -211,8 +196,14 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
     displayRotationHelper = new DisplayRotationHelper(/* context= */ this);
 
     // Set up touch listener.
-    tapHelper = new TapHelper(/* context= */ this);
-    surfaceView.setOnTouchListener(tapHelper);
+//    tapHelper = new TapHelper(/* context= */ this);
+//    surfaceView.setOnTouchListener(tapHelper);
+    surfaceView.setOnClickListener(mSurfaceClickListener = new View.OnClickListener() {
+      @Override
+      public void onClick(View v) {
+        mHasBeenClicked = true;
+      }
+    });
 
     // Set up renderer.
     render = new SampleRender(surfaceView, this, getAssets());
@@ -220,7 +211,6 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
     installRequested = false;
 
     depthSettings.onCreate(this);
-    instantPlacementSettings.onCreate(this);
     ImageButton settingsButton = findViewById(R.id.settings_button);
     settingsButton.setOnClickListener(
         new View.OnClickListener() {
@@ -238,9 +228,6 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
   protected boolean settingsMenuClick(MenuItem item) {
     if (item.getItemId() == R.id.depth_settings) {
       launchDepthSettingsMenuDialog();
-      return true;
-    } else if (item.getItemId() == R.id.instant_placement_settings) {
-      launchInstantPlacementSettingsMenuDialog();
       return true;
     }
     return false;
@@ -447,12 +434,6 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
               "models/pawn_albedo.png",
               Texture.WrapMode.CLAMP_TO_EDGE,
               Texture.ColorFormat.SRGB);
-      virtualObjectAlbedoInstantPlacementTexture =
-          Texture.createFromAsset(
-              render,
-              "models/pawn_albedo_instant_placement.png",
-              Texture.WrapMode.CLAMP_TO_EDGE,
-              Texture.ColorFormat.SRGB);
       Texture virtualObjectPbrTexture =
           Texture.createFromAsset(
               render,
@@ -573,10 +554,12 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
     } else if (hasTrackingPlane()) {
       if (wrappedAnchors.isEmpty()) {
         message = WAITING_FOR_TAP_MESSAGE;
+        surfaceView.setContentDescription(WAITING_FOR_TAP_MESSAGE);
       }
       sonifyCurrentOffsets(offsets[0], offsets[2]);
     } else {
       message = SEARCHING_PLANE_MESSAGE;
+      surfaceView.setContentDescription(SEARCHING_PLANE_MESSAGE);
     }
     if (message == null) {
       messageSnackbarHelper.hide(this);
@@ -649,15 +632,7 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
       // Update shader properties and draw
       virtualObjectShader.setMat4("u_ModelView", modelViewMatrix);
       virtualObjectShader.setMat4("u_ModelViewProjection", modelViewProjectionMatrix);
-
-      if (trackable != null && trackable instanceof InstantPlacementPoint
-          && ((InstantPlacementPoint) trackable).getTrackingMethod()
-              == InstantPlacementPoint.TrackingMethod.SCREENSPACE_WITH_APPROXIMATE_DISTANCE) {
-        virtualObjectShader.setTexture(
-            "u_AlbedoTexture", virtualObjectAlbedoInstantPlacementTexture);
-      } else {
-        virtualObjectShader.setTexture("u_AlbedoTexture", virtualObjectAlbedoTexture);
-      }
+      virtualObjectShader.setTexture("u_AlbedoTexture", virtualObjectAlbedoTexture);
 
       render.draw(virtualObjectMesh, virtualObjectShader, virtualSceneFramebuffer);
     }
@@ -840,8 +815,6 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
 
       message = String.format(direction, theta);
     }
-
-//    message += String.format(", then move %.2f meters", dist);
     return message;
   }
 
@@ -927,18 +900,15 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
 
   // Handle only one tap per frame, as taps are usually low frequency compared to frame rate.
   private void handleTap(Frame frame, Camera camera) {
-    MotionEvent tap = tapHelper.poll();
-    if (tap == null || camera.getTrackingState() != TrackingState.TRACKING) {
+    if (!mHasBeenClicked || camera.getTrackingState() != TrackingState.TRACKING) {
       return;
     }
+    mHasBeenClicked = false;
 
     // Cap the number of objects created. This avoids overloading both the
     // rendering system and ARCore.
 
     // Clear all the wrapped anchors, start fresh.
-    // TODO: May want to do this not just on-tap, as this will behave poorly.
-    // Or confirm before clearing or something.
-    // The exact UX is probably less important.
     while (wrappedAnchors.size() > 0) {
       wrappedAnchors.get(0).getAnchor().detach();
       wrappedAnchors.remove(0);
@@ -971,83 +941,6 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
     targetPose = getTargetPoseAtNMeters(cameraPose, targetPose, TARGET_DISTANCE_ALONG_RAY);
 
     wrappedAnchors.add(new WrappedAnchor(session.createAnchor(targetPose), null));
-
-    boolean runHitTest = false;
-    if (!runHitTest) {
-      return;
-    }
-
-    // This does hit testing.
-    // Maybe can use later for obstacle detection.
-    List<HitResult> hitResultList;
-      if (instantPlacementSettings.isInstantPlacementEnabled()) {
-        // https://developers.google.com/ar/reference/java/com/google/ar/core/InstantPlacementPoint
-        // TODO: Do I want to allow this or just do it for planes that already have Z?
-        // I think it's easier to ignore for now.
-        hitResultList =
-            frame.hitTestInstantPlacement(tap.getX(), tap.getY(), APPROXIMATE_DISTANCE_METERS);
-      } else {
-        hitResultList = frame.hitTest(tap);
-      }
-      for (HitResult hit : hitResultList) {
-        // If any plane, Oriented Point, or Instant Placement Point was hit, create an anchor.
-        // https://developers.google.com/ar/reference/java/com/google/ar/core/Trackable
-        Trackable trackable = hit.getTrackable();
-        // If a plane was hit, check that it was hit inside the plane polygon.
-        // DepthPoints are only returned if Config.DepthMode is set to AUTOMATIC.
-
-        // TODO: What is a plane polygon? Do I need to be inside it?
-        // Probably can skip most of these until I get to a plane that is UPWARDS
-        // https://developers.google.com/ar/reference/java/com/google/ar/core/Plane.Type#horizontal_upward_facing
-        // because objects on a plane aren't very good to use as direction.
-        // Better perhaps would be to create a ray in the world in case the point is above a plane.
-
-
-//        if ((trackable instanceof Plane
-//                && ((Plane) trackable).isPoseInPolygon(hit.getHitPose())
-//                && (PlaneRenderer.calculateDistanceToPlane(hit.getHitPose(), camera.getPose()) > 0))
-//            || (trackable instanceof Point
-//                && ((Point) trackable).getOrientationMode()
-//                    == OrientationMode.ESTIMATED_SURFACE_NORMAL)
-//            || (trackable instanceof InstantPlacementPoint)
-//            || (trackable instanceof DepthPoint)) {
-
-        if (trackable instanceof Plane) {
-          Plane plane = (Plane) trackable;
-          // We want to hit a plane that's representing the floor.
-          if (!plane.isPoseInPolygon(hit.getHitPose()) || plane.getType() != Plane.Type.HORIZONTAL_UPWARD_FACING) {
-            continue;
-          }
-
-          float distanceToPlane = PlaneRenderer.calculateDistanceToPlane(hit.getHitPose(), camera.getPose());
-          // Shortest distance to this plane. This is straight down for the floor plane, for example.
-          if (distanceToPlane <= 0) {
-            continue;
-          }
-
-          // Start by making just 1 or 2 anchors for now (maybe "here" and "target")
-          // Looks like I can also make a new anchor, session.createAnchor(pose)
-          // Alternatively I can use one from the hit test.
-          // Probably I'll create an anchor from the current camera pose when tracking
-          // starts. Maybe on tap??
-          // Or I can make one that's N meters away using session.createAnchor(pose)
-          // rather than a hit test.
-
-
-          // Adding an Anchor tells ARCore that it should track this position in
-          // space. This anchor is created on the Plane to place the 3D model
-          // in the correct position relative both to the world and to the plane.
-//          wrappedAnchors.add(new WrappedAnchor(hit.createAnchor(), trackable));
-          // For devices that support the Depth API, shows a dialog to suggest enabling
-          // depth-based occlusion. This dialog needs to be spawned on the UI thread.
-          this.runOnUiThread(this::showOcclusionDialogIfNeeded);
-
-          // Hits are sorted by depth. Consider only closest hit on a plane, Oriented Point, or
-          // Instant Placement Point.
-          break;
-        }
-      }
-
   }
 
   /**
@@ -1074,25 +967,6 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
             (DialogInterface dialog, int which) -> {
               depthSettings.setUseDepthForOcclusion(false);
             })
-        .show();
-  }
-
-  private void launchInstantPlacementSettingsMenuDialog() {
-    resetSettingsMenuDialogCheckboxes();
-    Resources resources = getResources();
-    new AlertDialog.Builder(this)
-        .setTitle(R.string.options_title_instant_placement)
-        .setMultiChoiceItems(
-            resources.getStringArray(R.array.instant_placement_options_array),
-            instantPlacementSettingsMenuDialogCheckboxes,
-            (DialogInterface dialog, int which, boolean isChecked) ->
-                instantPlacementSettingsMenuDialogCheckboxes[which] = isChecked)
-        .setPositiveButton(
-            R.string.done,
-            (DialogInterface dialogInterface, int which) -> applySettingsMenuDialogCheckboxes())
-        .setNegativeButton(
-            android.R.string.cancel,
-            (DialogInterface dialog, int which) -> resetSettingsMenuDialogCheckboxes())
         .show();
   }
 
@@ -1133,16 +1007,12 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
   private void applySettingsMenuDialogCheckboxes() {
     depthSettings.setUseDepthForOcclusion(depthSettingsMenuDialogCheckboxes[0]);
     depthSettings.setDepthColorVisualizationEnabled(depthSettingsMenuDialogCheckboxes[1]);
-    instantPlacementSettings.setInstantPlacementEnabled(
-        instantPlacementSettingsMenuDialogCheckboxes[0]);
     configureSession();
   }
 
   private void resetSettingsMenuDialogCheckboxes() {
     depthSettingsMenuDialogCheckboxes[0] = depthSettings.useDepthForOcclusion();
     depthSettingsMenuDialogCheckboxes[1] = depthSettings.depthColorVisualizationEnabled();
-    instantPlacementSettingsMenuDialogCheckboxes[0] =
-        instantPlacementSettings.isInstantPlacementEnabled();
   }
 
   /** Checks if we detected at least one plane. */
@@ -1222,18 +1092,12 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
     } else {
       config.setDepthMode(Config.DepthMode.DISABLED);
     }
-    if (instantPlacementSettings.isInstantPlacementEnabled()) {
-      config.setInstantPlacementMode(InstantPlacementMode.LOCAL_Y_UP);
-    } else {
-      config.setInstantPlacementMode(InstantPlacementMode.DISABLED);
-    }
     session.configure(config);
   }
 }
 
 /**
- * Associates an Anchor with the trackable it was attached to. This is used to be able to check
- * whether or not an Anchor originally was attached to an {@link InstantPlacementPoint}.
+ * Associates an Anchor with the trackable it was attached to.
  */
 class WrappedAnchor {
   private Anchor anchor;
