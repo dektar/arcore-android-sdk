@@ -337,6 +337,8 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
     if (synth != null) {
       synth.stop();
       synth = null;
+      voiceL = null;
+      voiceR = null;
     }
     if (lineOut != null) {
       lineOut.stop();
@@ -723,12 +725,8 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
     if (synth == null) {
       audioManager = new AndroidAudioForJSyn();
       synth = JSyn.createSynthesizer(audioManager);
-      if (voiceL == null) {
-        voiceL = new SineEnvelope();
-      }
-      if (voiceR == null) {
-        voiceR = new SineEnvelope();
-      }
+      voiceL = new SineEnvelope();
+      voiceR = new SineEnvelope();
       synth.add(voiceL);
       synth.add(voiceR);
 
